@@ -1,0 +1,89 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "low-contrast",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/assigned.html"
+        ],
+        "createdAt": "2026-10-25T12:31:27.216Z",
+        "reason": "Claude: throwaway decision-page sketch drawn as a skeleton; never shipped"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/assigned.html"
+        ],
+        "createdAt": "2026-10-25T12:31:27.911Z",
+        "reason": "Claude: throwaway decision-page sketch drawn as a skeleton; never shipped"
+      },
+      {
+        "rule": "undersized-ui-text",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/assigned.html"
+        ],
+        "createdAt": "2026-10-25T12:31:28.659Z",
+        "reason": "Claude: throwaway decision-page sketch drawn as a skeleton; never shipped"
+      },
+      {
+        "rule": "low-contrast",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/model-pick.html"
+        ],
+        "createdAt": "2026-10-25T12:31:29.442Z",
+        "reason": "Claude: throwaway decision-page sketch drawn as a skeleton; never shipped"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/model-pick.html"
+        ],
+        "createdAt": "2026-10-25T12:31:30.159Z",
+        "reason": "Claude: throwaway decision-page sketch drawn as a skeleton; never shipped"
+      },
+      {
+        "rule": "undersized-ui-text",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/model-pick.html"
+        ],
+        "createdAt": "2026-10-25T12:31:30.877Z",
+        "reason": "Claude: throwaway decision-page sketch drawn as a skeleton; never shipped"
+      },
+      {
+        "rule": "low-contrast",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/challenger-transit-night.html"
+        ],
+        "createdAt": "2026-10-25T12:31:31.714Z",
+        "reason": "Claude: throwaway decision-page sketch drawn as a skeleton; never shipped"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/challenger-transit-night.html"
+        ],
+        "createdAt": "2026-10-25T12:31:32.515Z",
+        "reason": "Claude: throwaway decision-page sketch drawn as a skeleton; never shipped"
+      },
+      {
+        "rule": "undersized-ui-text",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/challenger-transit-night.html"
+        ],
+        "createdAt": "2026-10-25T12:31:33.205Z",
+        "reason": "Claude: throwaway decision-page sketch drawn as a skeleton; never shipped"
+      }
+    ]
+  }
+}

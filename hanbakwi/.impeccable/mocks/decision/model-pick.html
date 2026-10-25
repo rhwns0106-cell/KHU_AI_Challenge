@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=390">
+<link href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@400;700;900&family=Anton&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:390px;height:844px;overflow:hidden}
+body{font-family:"Gothic A1",sans-serif;background:#E9E7E0;color:#111}
+.head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px}
+.head b{font-weight:900;font-size:20px}
+.head span{font-size:12px;font-weight:700;background:#111;color:#F7F6F1;padding:4px 10px;border-radius:999px}
+.ask{margin:0 16px;background:#F7F6F1;border:2px solid #111;border-radius:12px;padding:12px;font-size:14px;display:flex;justify-content:space-between}
+.ask em{font-style:normal;font-weight:900;color:#FF5A1F}
+.bib{margin:14px 16px 0;background:#F7F6F1;border-radius:6px;position:relative;padding:14px 16px 16px;box-shadow:0 1px 0 #cfccc2}
+.bib:before,.bib:after{content:"";position:absolute;top:10px;width:10px;height:10px;border-radius:50%;background:#E9E7E0}
+.bib:before{left:10px}.bib:after{right:10px}
+.band{background:#FF5A1F;color:#fff;font-weight:900;font-size:12px;letter-spacing:.12em;text-align:center;padding:5px;margin:0 -16px 10px}
+.no{font-family:Anton,sans-serif;font-size:96px;line-height:.9;text-align:center;letter-spacing:.01em}
+.no small{font-size:30px}
+.name{text-align:center;font-weight:900;font-size:16px;margin-top:6px}
+.row{display:grid;grid-template-columns:repeat(3,1fr);margin-top:12px;border-top:2px solid #111}
+.row div{padding:8px 0 0;text-align:center}
+.row small{display:block;font-size:11px;font-weight:700;color:#55534d}
+.row b{font-family:Anton,sans-serif;font-size:24px}
+.map{position:relative;margin:14px 16px 0;height:250px;background:#F7F6F1;border-radius:6px;overflow:hidden}
+.km{position:absolute;width:26px;height:26px;border-radius:4px;background:#111;color:#fff;font-family:Anton,sans-serif;font-size:14px;display:grid;place-items:center}
+.alts{display:flex;gap:8px;margin:14px 16px 0}
+.alt{flex:1;background:#F7F6F1;border-radius:6px;padding:8px;opacity:.75}
+.alt b{font-family:Anton,sans-serif;font-size:22px}
+.alt small{display:block;font-size:11px;font-weight:700}
+.alt i{display:block;height:4px;background:#1F4FD8;margin:-8px -8px 6px;border-radius:6px 6px 0 0}
+</style></head><body>
+<div class="head"><b>한바퀴</b><span>정문 출발 · 오늘</span></div>
+<div class="ask"><span>공강 30분인데 오르막 싫어</span><em>찾기</em></div>
+<div class="bib">
+  <div class="band">KHU 순환 · 평지 코스 A</div>
+  <div class="no">5.35<small>km</small></div>
+  <div class="name">정문 → 영통역 → 정문</div>
+  <div class="row"><div><small>예상</small><b>35분</b></div><div><small>상승</small><b>67m</b></div><div><small>최대</small><b>8%</b></div></div>
+</div>
+<div class="map">
+  <svg viewBox="0 0 358 250" width="358" height="250">
+    <path d="M0 50 L358 90 M30 0 L110 250 M0 190 L358 170" stroke="#E2DFD6" stroke-width="10"/>
+    <path d="M230 210 L210 175 L110 160 L70 110 L115 60 L200 45 L255 85 L248 150 Z" fill="none" stroke="#111" stroke-width="9" stroke-linejoin="round"/>
+    <path d="M110 160 L70 110 L115 60" fill="none" stroke="#FF5A1F" stroke-width="5"/>
+    <path d="M230 210 L210 175 L110 160 M115 60 L200 45 L255 85 L248 150 L230 210" fill="none" stroke="#3CB44A" stroke-width="5"/>
+  </svg>
+  <span class="km" style="left:62px;top:96px">1</span>
+  <span class="km" style="left:150px;top:34px">2</span>
+  <span class="km" style="left:244px;top:110px">3</span>
+  <span class="km" style="left:160px;top:150px">4</span>
+</div>
+<div class="alts">
+  <div class="alt"><i></i><b>4.85</b><small>코스 B · 32분</small></div>
+  <div class="alt"><i style="background:#FF5A1F"></i><b>4.61</b><small>코스 C · 30분</small></div>
+</div>
+</body></html>
