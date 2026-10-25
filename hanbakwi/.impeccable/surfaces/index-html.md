@@ -5,7 +5,7 @@ primary_target: "index.html"
 related_targets: []
 ---
 
-# Surface: 한바퀴 코스 추천 화면 (index.html)
+# Surface: orca 코스 추천 화면 (index.html)
 
 Mode: Operate. 휴대폰 우선, 데스크톱은 지도 확장.
 Audience/job: 공강에 출발 직전인 국제캠 러너가 입력 한 번으로 순환 코스 하나를 고른다. 심사위원은 시연으로 같은 흐름을 본다.
