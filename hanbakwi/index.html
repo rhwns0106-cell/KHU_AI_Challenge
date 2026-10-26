@@ -413,11 +413,29 @@ function useMyLocation(){
 // 장소 이름 → 좌표: OpenStreetMap 검색(Nominatim), 지원 지역 안에서만 찾는다
 async function findPlace(name){
   startMsg('"' + name + '"을(를) 지도에서 찾는 중이에요…');
-  // 1순위 카카오(가게까지 촘촘함). 키가 없거나 못 찾으면 OpenStreetMap 검색으로
+  // 1순위 카카오(가게까지 촘촘함). "영통역점"처럼 없는 지점명이면 "점"을 뗀 검색도 합쳐서 본다
   try {
-    const r = await fetch('/api/place?q=' + encodeURIComponent(name));
-    const hit = r.ok && (await r.json()).places[0];
-    if (hit){ setCustom(hit.name, (hit.lon - LO0)*KX, (hit.lat - LA0)*KY); if (state.start === 'custom') startMsg('카카오맵에서 찾은 곳: ' + hit.name + ' (' + hit.address + ')'); return; }
+    let places = [];
+    for (const q of [...new Set([name, name.replace(/점$/, '')])]){
+      const r = await fetch('/api/place?q=' + encodeURIComponent(q));
+      if (r.ok) places = places.concat((await r.json()).places);
+    }
+    places = places.filter((p, i) => places.findIndex(o => o.name === p.name) === i);
+    // 말한 낱말이 이름에 모두 들어 있으면 그곳으로, 아니면 후보를 보여주고 고르게 한다(엉뚱한 지점으로 가지 않게)
+    const words = name.split(/\s+/).map(w => w.replace(/점$/, '')).filter(Boolean);
+    const exact = places.find(p => words.every(w => p.name.replace(/\s/g, '').includes(w)));
+    const go = p => { setCustom(p.name, (p.lon - LO0)*KX, (p.lat - LA0)*KY); if (state.start === 'custom') startMsg('카카오맵에서 찾은 곳: ' + p.name + ' (' + p.address + ')'); };
+    if (exact) return go(exact);
+    if (places.length){
+      const box = document.getElementById('startmsg');
+      box.textContent = '"' + name + '"과 이름이 똑같은 곳은 없어요. 어디서 출발할까요? ';
+      places.slice(0, 4).forEach(p => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'linkbtn';
+        b.textContent = p.name; b.title = p.address; b.style.marginRight = '10px'; b.onclick = () => go(p);
+        box.appendChild(b);
+      });
+      return;
+    }
   } catch(e){}
   // 세부 이름(출구 번호 등)으로 못 찾으면 떼고 한 번 더
   for (const q of [...new Set([name, name.replace(/\s*\d+\s*번\s*(출구|게이트|문)/, '').trim()])]){
