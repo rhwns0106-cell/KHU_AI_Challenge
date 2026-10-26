@@ -26,7 +26,46 @@ ways = overpass(f'[out:json][timeout:180];way[highway]({S},{W},{N},{E});out geom
 forest_els = overpass(f'[out:json][timeout:180];(way[natural~"^(wood|scrub)$"]({S},{W},{N},{E});way[landuse=forest]({S},{W},{N},{E});'
                       f'relation[natural~"^(wood|scrub)$"]({S},{W},{N},{E});relation[landuse=forest]({S},{W},{N},{E}););out geom;')
 # 신호등 노드(차량 신호·신호 있는 건널목): 코스가 이 노드를 지나는 간선에 표시한다
-sig_nodes = {e['id'] for e in overpass(f'[out:json][timeout:120];(node[highway=traffic_signals]({S},{W},{N},{E});node[crossing=traffic_signals]({S},{W},{N},{E});node["crossing:signals"=yes]({S},{W},{N},{E}););out ids;')}
+# 1 = 보행자 신호 건널목(신호 있는 횡단보도 점), 2 = 차량 신호(교차로 점: 코스가 거기서 꺾을 때만 센다)
+sig_kind = {}
+for e in overpass(f'[out:json][timeout:120];(node[highway=traffic_signals]({S},{W},{N},{E});node[crossing=traffic_signals]({S},{W},{N},{E});node["crossing:signals"=yes]({S},{W},{N},{E}););out tags;'):
+    t = e.get('tags', {})
+    sig_kind[e['id']] = 1 if (t.get('crossing') == 'traffic_signals' or t.get('crossing:signals') == 'yes') else 2
+sig_nodes = set(sig_kind)
+# 그늘: 공원·정원·잔디 영역(아래 rings와 같은 방식) + 가로수·나무 점
+green_els = overpass(f'[out:json][timeout:180];(way[leisure~"^(park|garden)$"]({S},{W},{N},{E});relation[leisure=park]({S},{W},{N},{E});'
+                     f'way[landuse~"^(recreation_ground|village_green)$"]({S},{W},{N},{E}););out geom;')
+tree_els = overpass(f'[out:json][timeout:180];(way[natural=tree_row]({S},{W},{N},{E});node[natural=tree]({S},{W},{N},{E}););out geom;')
+# 쉴 곳: 벤치·쉼터·음수대·화장실·피크닉 테이블 (종류 번호 1~5)
+REST = {'bench': 1, 'shelter': 2, 'drinking_water': 3, 'toilets': 4, 'picnic_table': 5}
+rest_els = overpass(f'[out:json][timeout:180];(node[amenity~"^(bench|shelter|drinking_water|toilets)$"]({S},{W},{N},{E});'
+                    f'node[leisure=picnic_table]({S},{W},{N},{E});way[amenity~"^(shelter|toilets)$"]({S},{W},{N},{E}););out center;')
+rest = []
+for e in rest_els:
+    t = e.get('tags', {}); kind = REST.get(t.get('amenity')) or REST.get(t.get('leisure'))
+    c = e if e['type'] == 'node' else e.get('center')
+    if kind and c: x, y = xy(c['lat'], c['lon']); rest += [round(x), round(y), kind]
+tree_cells = set()  # 15m 칸 단위 나무 위치(가로수는 10m마다 점으로 쪼갬)
+for e in tree_els:
+    g = e.get('geometry') or ([{'lat': e['lat'], 'lon': e['lon']}] if 'lat' in e else [])
+    for p0, p1 in zip(g, g[1:] or g):
+        (x0, y0), (x1, y1) = xy(p0['lat'], p0['lon']), xy(p1['lat'], p1['lon'])
+        n = max(1, int(math.hypot(x1 - x0, y1 - y0) // 10))
+        for i in range(n + 1): tree_cells.add((round((x0 + (x1 - x0) * i / n) / 15), round((y0 + (y1 - y0) * i / n) / 15)))
+def near_tree(x, y):
+    cx, cy = round(x / 15), round(y / 15)
+    return any((cx + i, cy + j) in tree_cells for i in (-1, 0, 1) for j in (-1, 0, 1))
+def to_rings(els):
+    out = []
+    for e in els:
+        geoms = [e['geometry']] if e['type'] == 'way' and e.get('geometry') else [m['geometry'] for m in e.get('members', []) if m.get('role') == 'outer' and m.get('geometry')]
+        for g in geoms:
+            pts = [xy(p['lat'], p['lon']) for p in g]
+            if len(pts) >= 3:
+                xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+                out.append((min(xs), min(ys), max(xs), max(ys), pts))
+    return out
+green_rings = to_rings(green_els)
 rings = []
 for e in forest_els:
     geoms = [e['geometry']] if e['type'] == 'way' and e.get('geometry') else [m['geometry'] for m in e.get('members', []) if m.get('role') == 'outer' and m.get('geometry')]
@@ -35,8 +74,8 @@ for e in forest_els:
         if len(pts) >= 3:
             xs, ys = [p[0] for p in pts], [p[1] for p in pts]
             rings.append((min(xs), min(ys), max(xs), max(ys), pts))
-def in_forest(x, y):
-    for x0, y0, x1, y1, pts in rings:
+def in_forest(x, y, rs=None):
+    for x0, y0, x1, y1, pts in (rings if rs is None else rs):
         if not (x0 <= x <= x1 and y0 <= y <= y1): continue
         inside, j = False, len(pts) - 1
         for i in range(len(pts)):
@@ -54,8 +93,9 @@ PAVED = {'asphalt', 'concrete', 'paving_stones', 'sett', 'paved', 'concrete:plat
 CAR = {'primary', 'primary_link', 'secondary', 'secondary_link', 'tertiary', 'tertiary_link', 'unclassified', 'residential', 'service', 'living_street', 'road'}
 
 idx, nodes, edges, adj = {}, [], {}, {}
+osm_of = []
 def nid(osm, la, lo):
-    if osm not in idx: idx[osm] = len(nodes); nodes.append(xy(la, lo))
+    if osm not in idx: idx[osm] = len(nodes); nodes.append(xy(la, lo)); osm_of.append(osm)
     return idx[osm]
 n_trail = 0
 for w in ways:
@@ -78,8 +118,13 @@ for w in ways:
         a, b = nid(w['nodes'][k], g[k]['lat'], g[k]['lon']), nid(w['nodes'][k + 1], g[k + 1]['lat'], g[k + 1]['lon'])
         if a == b: continue
         # 128: 신호(이 간선 끝이 신호 노드이거나 신호 건널목 길)
-        edges[(min(a, b), max(a, b))] = flag | (128 if sig_way or w['nodes'][k] in sig_nodes or w['nodes'][k + 1] in sig_nodes else 0)
+        # 512: 그늘(공원·숲 안이거나 가로수·나무 15m 안)
+        ex, ey = (nodes[a][0] + nodes[b][0]) / 2, (nodes[a][1] + nodes[b][1]) / 2
+        shade = near_tree(ex, ey) or in_forest(ex, ey, green_rings) or in_forest(ex, ey)
+        edges[(min(a, b), max(a, b))] = flag | (128 if sig_way or w['nodes'][k] in sig_nodes or w['nodes'][k + 1] in sig_nodes else 0) | (512 if shade else 0)
         adj.setdefault(a, set()).add(b); adj.setdefault(b, set()).add(a)
+print('green rings', len(green_rings), 'tree cells', len(tree_cells), 'rest', len(rest) // 3, 'shade edges', sum(1 for f in edges.values() if f & 512))
+print('signal nodes: crossing', sum(1 for v in sig_kind.values() if v == 1), 'vehicle', sum(1 for v in sig_kind.values() if v == 2))
 print('ways', len(ways), 'forest rings', len(rings), 'trail ways', n_trail,
       'sidewalk tagged', sum(1 for w in ways if 'sidewalk' in ' '.join(w.get('tags', {}))),
       'footway=sidewalk', sum(1 for w in ways if w.get('tags', {}).get('footway') == 'sidewalk'), 'signal nodes', len(sig_nodes))
@@ -118,7 +163,9 @@ json.dump(cache, open(cache_path, 'w'))
 
 out = {'nodes': [v for o in keep for v in (round(nodes[o][0]), round(nodes[o][1]))],
        'elev': [round((cache.get('%d,%d' % cell(*nodes[o])) or 0) * 10) for o in keep],  # 0.1m 단위
-       'edges': [v for (a, b), f in edges.items() if a in remap and b in remap for v in (remap[a], remap[b], f)]}
+       'edges': [v for (a, b), f in edges.items() if a in remap and b in remap for v in (remap[a], remap[b], f)],
+       'rest': rest,
+       'sig': [v for o in keep if osm_of[o] in sig_kind for v in (remap[o], sig_kind[osm_of[o]])]}  # 신호 노드 [노드 번호, 1 보행자 건널목 | 2 차량 신호]...  # 쉴 곳 [x, y, 종류(1 벤치 2 쉼터 3 음수대 4 화장실 5 피크닉 테이블)]...
 path = os.path.join(HERE, '..', 'hanbakwi', 'graph.js')
 with open(path, 'w', encoding='utf-8') as f:
     f.write('// 보행 도로망(OSM) + 노드 고도(SRTM 30m, 0.1m 단위) + 산길 표시. tools/graph.py로 생성\nwindow.ORCA_GRAPH=' + json.dumps(out, separators=(',', ':')) + ';\n')

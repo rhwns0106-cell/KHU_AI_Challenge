@@ -158,6 +158,10 @@ canvas.drag{cursor:grabbing}
 .refine-msg{margin:0;font-size:14px;color:var(--muted);min-height:20px}
 .distnote{margin:4px 0 0;padding:8px 10px;border-left:3px solid var(--mild);background:var(--panel);font-size:14px;font-weight:600;border-radius:0 6px 6px 0}
 .distnote:empty{display:none}
+.wxmsg{margin:0;padding:8px 10px;border-left:3px solid var(--cobalt-ink);background:var(--panel);font-size:14px;line-height:1.5;border-radius:0 6px 6px 0}
+.wxmsg:empty,.restinfo:empty{display:none}
+.restinfo{margin:0;font-size:14px;color:var(--muted)}
+.restinfo b{color:var(--porcelain)}
 #startmsg:empty{display:none}
 .mic{display:grid;place-items:center;width:44px;border:0;background:transparent;cursor:pointer;color:var(--muted)}
 .mic[aria-pressed="true"]{color:var(--steep)}
@@ -213,6 +217,10 @@ canvas.drag{cursor:grabbing}
       <p class="refine-msg" id="startmsg" aria-live="polite"></p>
       <div class="ctl"><span id="l-dist">거리</span><div class="seg" id="seg-dist" role="group" aria-labelledby="l-dist"></div></div>
       <div class="ctl"><span id="l-terr">지형</span><div class="seg" id="seg-terr" role="group" aria-labelledby="l-terr"></div></div>
+      <div class="ctl"><span id="l-shape">모양</span><div class="seg" id="seg-shape" role="group" aria-labelledby="l-shape"></div></div>
+      <div class="ctl"><span id="l-wx">날씨</span><div class="seg" id="seg-wx" role="group" aria-labelledby="l-wx"></div></div>
+      <div class="ctl"><span id="l-rest">쉬기</span><div class="seg" id="seg-rest" role="group" aria-labelledby="l-rest"></div></div>
+      <p class="wxmsg" id="wxmsg" aria-live="polite"></p>
     </div>
 
     <div class="mapslot" id="mapslot"></div>
@@ -223,6 +231,7 @@ canvas.drag{cursor:grabbing}
         <button class="linkbtn" id="revbtn" type="button" aria-pressed="false">반대 방향으로 돌기</button></div>
       <div class="line" id="line"></div>
       <div class="shares" id="shares"></div>
+      <p class="restinfo" id="restinfo"></p>
     </section>
 
     <section aria-label="추천 코스">
@@ -286,7 +295,43 @@ const PACE = 6.5; // 분/km, 예상 시간 계산용
 const STEP = 25;  // 고도 표본 간격(m)
 const NAMES = ['A','B','C'];
 
-const state = {start:'gate', dist:5, terr:'flat', sel:0, budget:null, focus:-1, rev:false, dest:null};
+const state = {start:'gate', dist:5, terr:'flat', sel:0, budget:null, focus:-1, rev:false, dest:null, wx:'auto', rests:0};
+const WX_OPTS = [['auto','현재 날씨'],['clear','맑음'],['wet','비·눈 온 뒤'],['hot','더움']];
+const REST_OPTS = [[0,'안 쉬어요'],[1,'1번'],[2,'2번'],[3,'3번']];
+// 모양 코스 기본 윤곽(화면 좌표: y가 아래로). 목록에 없는 모양은 ChatKHU가 윤곽을 만든다
+const SHAPES = {
+  '별': Array.from({length:10}, (_, i) => { const r = i % 2 ? 0.4 : 1, a = -Math.PI/2 + i*Math.PI/5; return [r*Math.cos(a), r*Math.sin(a)]; }),
+  '하트': Array.from({length:16}, (_, i) => { const t = i/16*2*Math.PI; return [16*Math.sin(t)**3, -(13*Math.cos(t) - 5*Math.cos(2*t) - 2*Math.cos(3*t) - Math.cos(4*t))]; }),
+  '고양이 얼굴': [[0,1],[0.7,0.75],[1,0.2],[0.9,-0.5],[0.95,-1.1],[0.45,-0.75],[0,-0.8],[-0.45,-0.75],[-0.95,-1.1],[-0.9,-0.5],[-1,0.2],[-0.7,0.75]],
+  '동그라미': Array.from({length:16}, (_, i) => [Math.cos(i/16*2*Math.PI), Math.sin(i/16*2*Math.PI)]),
+  '거북이': [[-1,0.1],[-0.85,-0.35],[-0.5,-0.6],[0,-0.7],[0.5,-0.6],[0.8,-0.35],[1.05,-0.3],[1.3,-0.15],[1.3,0.1],[1.05,0.15],[0.85,0.2],[0.8,0.45],[0.6,0.5],[0.55,0.3],[-0.4,0.3],[-0.45,0.5],[-0.65,0.5],[-0.7,0.25],[-0.95,0.25],[-1.2,0.35]],
+  '물고기': [[1,0],[0.8,-0.35],[0.4,-0.55],[-0.1,-0.5],[-0.5,-0.25],[-0.9,-0.6],[-0.8,0],[-0.9,0.6],[-0.5,0.25],[-0.1,0.5],[0.4,0.55],[0.8,0.35]]
+};
+// 모양 이름 → 윤곽: 기본 목록에서 찾고, 없으면 ChatKHU에 윤곽을 만들어 달라고 한다
+async function setShape(name){
+  const key = Object.keys(SHAPES).find(k => name.replace(/\s/g, '').includes(k.replace(/\s/g, '')) || (k === '고양이 얼굴' && /고양이/.test(name)));
+  if (key){ state.shape = {name:key, pts:SHAPES[key]}; }
+  else {
+    startMsg('ChatKHU가 "' + name + '" 모양 윤곽을 그리는 중이에요…');
+    const a = await ai('shape', {name});
+    const ok = a && Array.isArray(a.points) && a.points.length >= 6 && a.points.every(q => Array.isArray(q) && q.length === 2 && q.every(Number.isFinite));
+    if (!ok){ startMsg('"' + name + '" 모양을 만들지 못했어요. 별·하트·고양이 얼굴·동그라미 중에서 골라 보세요.'); return; }
+    state.shape = {name:a.name || name, pts:untangle(a.points), ai:true};
+    startMsg('ChatKHU가 그린 "' + state.shape.name + '" 윤곽을 실제 길에 맞췄어요. 점선이 원래 모양이에요.');
+  }
+  if (state.dest) state.dest = null; // 모양 코스는 출발지로 돌아오는 순환
+  Object.assign(state, {sel:0, focus:-1}); renderAll(true);
+}
+// AI가 그린 윤곽의 선이 서로 꼬여 있으면 중심 기준 각도 순으로 다시 늘어놓는다(오목한 부분은 조금 무뎌지지만 한붓그리기가 된다)
+function untangle(pts){
+  const cross = (a, b, c, d) => { const o = (p, q, r) => Math.sign((q[0]-p[0])*(r[1]-p[1]) - (q[1]-p[1])*(r[0]-p[0])); return o(a,b,c) !== o(a,b,d) && o(c,d,a) !== o(c,d,b); };
+  const n = pts.length; let bad = false;
+  for (let i = 0; i < n && !bad; i++) for (let j = i + 2; j < n; j++) { if (i === 0 && j === n - 1) continue; if (cross(pts[i], pts[(i+1)%n], pts[j], pts[(j+1)%n])){ bad = true; break; } }
+  if (!bad) return pts;
+  const cx = pts.reduce((a, p) => a + p[0], 0)/n, cy = pts.reduce((a, p) => a + p[1], 0)/n;
+  return pts.slice().sort((p, q) => Math.atan2(p[1]-cy, p[0]-cx) - Math.atan2(q[1]-cy, q[0]-cx));
+}
+function shapeSim(r){ return Math.max(0, Math.round((1 - Math.min(1, r.shapeErr / 0.2))*100)); }
 
 /* 모바일에서는 지도를 패널 안 입력 아래로, 데스크톱에서는 오른쪽 전체로 */
 const box = document.getElementById('mapbox'), slot = document.getElementById('mapslot'), app = document.querySelector('.app');
@@ -352,6 +397,8 @@ async function applyAsk(){
   if (it.repeat_last) await useLastRun(!!(a && (a.km || a.minutes)));
   if (it.here) useMyLocation(); else if (it.place) await findPlace(it.place);
   if (a){ if (a.dest) await findPlace(a.dest, 'dest'); else clearDest(); } // 새 요청에 목적지가 없으면 순환으로
+  if (a && a.shape) await setShape(a.shape); else if (a && state.shape){ state.shape = null; renderAll(true); } // 새 요청에 모양이 없으면 보통 코스로
+  if (a && a.weather && WX_OPTS.some(o => o[0] === a.weather) && state.wx !== a.weather){ state.wx = a.weather; renderAll(true); }
   if (it.novel) await pickNovel(a && a.terrain);
 }
 
@@ -466,7 +513,8 @@ function ensureRoutes(){
   const s = st.node != null ? st.node : OrcaLoop.near(graph(), st.x, st.y)[0];
   const tick = p => { if (rkey(D, '') !== key || (state.terr === 'trail' ? 'trail' : 'road') !== pref) return false; genPct = p; renderCards(); };
   genPct = 0;
-  const job = state.dest ? OrcaLoop.makeRoutes(graph(), s, state.dest.node, D*1000, tick, pref) : OrcaLoop.makeLoops(graph(), s, D*1000, tick, pref);
+  const opts = {wet:wxMode() === 'wet', hot:wxMode() === 'hot'};
+  const job = state.shape ? OrcaLoop.makeShape(graph(), s, D*1000, state.shape.pts, tick, opts) : state.dest ? OrcaLoop.makeRoutes(graph(), s, state.dest.node, D*1000, tick, pref, opts) : OrcaLoop.makeLoops(graph(), s, D*1000, tick, pref, opts);
   const g = job.then(out => {
     if (gen === g) gen = null;
     if (!out) return ensureRoutes(); // 멈춘 생성: 지금 조건으로 다시
@@ -571,11 +619,31 @@ function directed(r, rev){
   let asc = 0; for (let i = 1; i < n; i++) asc += Math.max(0, el[i] - el[i-1]);
   return c[rev] = Object.assign(o, {share:cnt.map(k => k/n), asc:Math.round(asc), maxg:Math.max(0, ...g)});
 }
-function rkey(d = state.dist, t = state.terr){ return state.start + (state.dest ? '>' + state.dest.key : '') + '|' + d + '|' + t; }
+function rkey(d = state.dist, t = state.terr){ return state.start + (state.dest ? '>' + state.dest.key : '') + '|' + d + '|' + wxMode() + (state.shape ? '|모양:' + state.shape.name : '') + '|' + t; } // 지형은 맨 끝: 저장할 때 rkey(D, '') + 지형
+let NOW = null; // 현재 날씨 {temp, mode:'wet'|'hot'|'clear', desc}
+function wxMode(){ return state.wx === 'auto' ? (NOW ? NOW.mode : 'clear') : state.wx; }
+const WCODE = c => c === 0 ? '맑음' : c <= 3 ? '구름' : c <= 48 ? '안개' : c <= 67 ? '비' : c <= 77 ? '눈' : c <= 82 ? '소나기' : c <= 86 ? '눈' : '뇌우';
+async function loadWeather(){
+  try {
+    const u = 'https://api.open-meteo.com/v1/forecast?latitude=37.2432&longitude=127.0818&current=temperature_2m,precipitation,snowfall,weather_code'
+            + '&hourly=precipitation,snowfall&past_hours=3&forecast_hours=1&timezone=Asia%2FSeoul';
+    const d = await (await fetch(u)).json(), c = d.current, sum = a => (a || []).reduce((p, q) => p + (q || 0), 0);
+    // 지금 오거나 최근 3시간에 비·눈이 왔으면 '비·눈 온 뒤', 28도 이상이면 '더움'
+    const wet = c.precipitation > 0 || c.snowfall > 0 || sum(d.hourly.precipitation) >= 0.3 || sum(d.hourly.snowfall) > 0 || (c.weather_code >= 51 && c.weather_code <= 99 && c.weather_code !== 45 && c.weather_code !== 48);
+    NOW = {temp:Math.round(c.temperature_2m), mode: wet ? 'wet' : c.temperature_2m >= 28 ? 'hot' : 'clear', desc:WCODE(c.weather_code)};
+  } catch(e){ NOW = null; }
+  renderAll(state.wx === 'auto');
+}
+function wxNote(){
+  const m = wxMode(), head = state.wx === 'auto' ? (NOW ? '지금 ' + NOW.temp + '°C · ' + NOW.desc + '. ' : '현재 날씨를 가져오는 중이에요. ') : '고른 날씨: ' + WX_OPTS.find(o => o[0] === state.wx)[1] + '. ';
+  if (m === 'wet') return head + '비·눈 온 뒤라 노면이 미끄러워요. 오르막·내리막이 가장 적은 코스로 골랐어요. 보폭을 줄이고 내리막은 천천히 달리세요.';
+  if (m === 'hot') return head + '더운 날이라 그늘(공원·가로수·숲 옆 길)이 많은 코스를 우선했어요. 물을 챙기고 평소보다 페이스를 낮추세요.';
+  return head + (NOW && state.wx === 'auto' && NOW.temp <= 3 ? '기온이 낮아요. 충분히 워밍업하고 시작하세요.' : '달리기 좋은 날씨예요.');
+}
 function current(){ return (R[rkey()] || []).map(r => directed(r, state.rev)); }
 function startName(){ return START_OPTS.find(s=>s[0]===state.start)[1]; }
 function endName(){ return state.dest ? state.dest.label : startName(); }
-function courseName(){ return state.dest ? startName() + ' → ' + endName() : startName() + ' 순환'; }
+function courseName(){ return state.shape ? startName() + ' ' + state.shape.name + ' 모양' : state.dest ? startName() + ' → ' + endName() : startName() + ' 순환'; }
 
 /* ---------- 지도 ---------- */
 const cv = document.getElementById('map'), ctx = cv.getContext('2d');
@@ -693,6 +761,21 @@ function draw(){
       ring(x, y, on ? 9 : 6, on ? 4 : 3, on ? css('--cobalt-ink') : css('--porcelain'));
       ctx.lineWidth = 4; ctx.strokeStyle = css('--ground'); ctx.strokeText(st.label, x+12, y);
       ctx.fillStyle = on ? css('--cobalt-ink') : css('--porcelain'); ctx.fillText(st.label, x+12, y);
+    });
+    if (r.tpl){ // 모양 코스: 원래 윤곽을 점선으로 겹쳐 비교
+      ctx.save(); ctx.strokeStyle = css('--porcelain'); ctx.globalAlpha = .55; ctx.lineWidth = 2/s; ctx.setLineDash([6/s, 6/s]);
+      const tp = mkPath(r.tpl, true); ctx.stroke(tp); ctx.restore();
+    }
+    // 쉴 곳: '쉼' 표지
+    (run.mode !== 'idle' ? run.rests || [] : restStops(r, state.rests)).forEach((p, j) => {
+      const [x, y] = toScreen(pts[2*p.i], pts[2*p.i+1]);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      ctx.fillStyle = css('--mild'); ctx.strokeStyle = css('--ground'); ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x-11, y-11, 22, 22, 6) : ctx.rect(x-11, y-11, 22, 22); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#1b1300'; ctx.font = '800 12px ' + css('--kr').split(',')[0]; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('쉼', x, y + 0.5);
+      ctx.textAlign = 'left'; ctx.lineWidth = 4; ctx.strokeStyle = css('--ground'); ctx.strokeText((j+1) + ' ' + p.kind, x + 15, y);
+      ctx.fillStyle = css('--mild'); ctx.fillText((j+1) + ' ' + p.kind, x + 15, y);
     });
     // 진행 방향: 화면에서 약 70px마다 › 화살표, 출발 직후 첫 화살표는 크게 코발트로
     const n = pts.length/2, every = Math.max(3, Math.ceil(70/(STEP*s)));
@@ -820,6 +903,8 @@ function renderStrip(){
   document.getElementById('strip-title').textContent = r ? NAMES[state.sel] + '선 · ' + courseName() + (state.rev ? ' (반대 방향)' : '') : '코스 없음';
   const bud = document.getElementById('budget'), shares = document.getElementById('shares');
   document.getElementById('distnote').textContent = tooFarNote();
+  const rst = r ? restStops(r, state.rests) : [];
+  document.getElementById('restinfo').innerHTML = rst.length ? '쉬는 곳: ' + rst.map(p => '<b>' + (p.i*STEP/1000).toFixed(1) + 'km</b> ' + p.kind).join(' · ') : '';
   if (!r){ line.innerHTML = ''; bud.textContent = ''; shares.innerHTML = ''; return; }
   const e = eta(r), mins = e.min;
   if (state.budget){
@@ -860,7 +945,7 @@ function renderCards(){
     b.innerHTML =
       '<span class="badge">' + NAMES[i] + '</span>' +
       '<span><b>' + NAMES[i] + '선 · ' + courseName() + '</b>' +
-      '<small>' + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · ' + (r.trail > 0.02 ? '산길 ' + Math.round(r.trail*100) + '% · ' : '') + (r.road > 0.1 ? '골목 차도 ' + Math.round(r.road*100) + '% · ' : '') + '상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small></span>' +
+      '<small>' + (r.shapeErr != null ? state.shape.name + ' 닮음 ' + shapeSim(r) + '% · ' : '') + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · ' + (wxMode() === 'hot' ? '그늘 ' + Math.round((r.shade || 0)*100) + '% · ' : '') + (wxMode() === 'wet' ? '5% 넘는 경사 ' + Math.round((r.share[2] + r.share[3])*100) + '% · ' : '') + (r.trail > 0.02 ? '산길 ' + Math.round(r.trail*100) + '% · ' : '') + (r.road > 0.1 ? '골목 차도 ' + Math.round(r.road*100) + '% · ' : '') + '상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small></span>' +
       '<span class="km">' + (r.dist/1000).toFixed(2) + '<em>km</em></span>';
     b.addEventListener('click', () => { state.sel = i; state.focus = -1; renderAll(false); });
     el.appendChild(b);
@@ -912,7 +997,8 @@ function renderBrief(){
   ai('brief', {route:{start:startName(), destination:state.dest ? endName() : '출발지로 돌아오는 순환', dist_km:+(r.dist/1000).toFixed(2), minutes:eta(r).min, signals:eta(r).sig, ascent_m:r.asc, max_grade_pct:Math.round(r.maxg),
       share_pct:{flat:flatPct, mild:Math.round(r.share[1]*100), up:Math.round(r.share[2]*100), steep:Math.round(r.share[3]*100), down:Math.round(r.share[4]*100)}, direction:state.rev ? '반대 방향' : '기본 방향',
       longest_climb: best ? {at_km:+(best.s*STEP/1000).toFixed(1), length_m:Math.round(best.len/10)*10, rise_m:Math.round(best.rise)} : null,
-      trail_pct:Math.round(r.trail*100), road_without_sidewalk_pct:Math.round((r.road || 0)*100), steps:r.steps, time_budget_min:state.budget}})
+      trail_pct:Math.round(r.trail*100), road_without_sidewalk_pct:Math.round((r.road || 0)*100), shade_pct:Math.round((r.shade || 0)*100),
+      weather:{mode:wxMode(), temp:NOW ? NOW.temp : null}, shape:state.shape ? {name:state.shape.name, similarity_pct:r.shapeErr != null ? shapeSim(r) : null} : null, rest_stops:restStops(r, state.rests).map(p => ({km:+(p.i*STEP/1000).toFixed(1), at:p.kind})), steps:r.steps, time_budget_min:state.budget}})
     .then(ls => {
       if (!Array.isArray(ls) || !ls.length){ if (key === rkey()+'|'+state.sel+'|'+state.rev) note.textContent = 'ChatKHU에 연결하지 못해 규칙으로 만든 문장을 보여드려요.'; return; }
       briefCache[key] = ls;
@@ -920,6 +1006,36 @@ function renderBrief(){
     });
 }
 const briefCache = {};
+/* ---------- 쉴 곳: 코스 30m 안 벤치·쉼터·음수대·화장실·피크닉 테이블, 없으면 신호 건널목 ---------- */
+const REST_NAME = ['', '벤치', '쉼터', '음수대', '화장실', '피크닉 테이블'];
+let restGrid = null;
+function restCands(r){
+  if (!restGrid){
+    restGrid = new Map(); const a = window.ORCA_GRAPH.rest || [];
+    for (let i = 0; i < a.length; i += 3){ const k = Math.round(a[i]/50) + ',' + Math.round(a[i+1]/50); if (!restGrid.has(k)) restGrid.set(k, []); restGrid.get(k).push(a.slice(i, i+3)); }
+  }
+  const out = [], n = r.pts.length/2;
+  for (let i = 0; i < n; i++){
+    const x = r.pts[2*i], y = r.pts[2*i+1], cx = Math.round(x/50), cy = Math.round(y/50);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++)
+      for (const q of restGrid.get((cx+dx) + ',' + (cy+dy)) || []) if (Math.hypot(q[0]-x, q[1]-y) < 30) out.push({i, kind:REST_NAME[q[2]]});
+  }
+  (r.sigAt || []).forEach(i => out.push({i, kind:'신호 건널목', sig:true}));
+  return out;
+}
+// 쉬는 횟수만큼 코스를 고르게 나눈 지점 근처에서 고른다(쉼 시설 우선, 없으면 신호 건널목, 그것도 없으면 그 지점)
+function restStops(r, k){
+  if (!k || !r) return [];
+  const n = r.pts.length/2, c = restCands(r), out = [];
+  for (let j = 1; j <= k; j++){
+    const t = Math.round(j*(n-1)/(k+1)), win = (n-1)/(k+1)/2;
+    let best = null;
+    c.forEach(p => { if (Math.abs(p.i - t) > win) return; const sc = Math.abs(p.i - t) + (p.sig ? 8 : 0); if (!best || sc < best.sc) best = {...p, sc}; });
+    out.push(best || {i:t, kind:'잠깐 쉬어갈 곳'});
+  }
+  return out;
+}
+
 /* ---------- 달리기: 시작 · 휴식 · 종료 + GPS 길안내 ---------- */
 // data.js 좌표와 같은 투영(build.py): 37.2432N, 127.0818E 기준 미터 평면
 const LA0 = 37.2432, LO0 = 127.0818, KX = Math.cos(LA0*Math.PI/180)*111320, KY = 110540;
@@ -985,7 +1101,10 @@ function guideText(){
   }
   const sg = (run.route.sigAt || []).find(i => i >= run.prog && (i - run.prog)*STEP <= 100);
   const sigNote = sg != null ? ' · ' + Math.max(10, (sg - run.prog)*STEP) + 'm 앞 신호 건널목' : '';
-  return {main: turn || '이 방향으로 계속 가세요', sub:'남은 거리 ' + (left/1000).toFixed(2) + 'km' + sigNote, target:rp(run.prog+3), turnAt, turnDist, sigAhead:sg, sigDist:sg != null ? (sg - run.prog)*STEP : null};
+  const rs = run.rests || [], ri = rs.findIndex(p => !p.done && p.i >= run.prog - 1), nr = ri >= 0 ? rs[ri] : null;
+  const restDist = nr ? Math.max(0, (nr.i - run.prog)*STEP) : null;
+  const restNote = nr && restDist <= 300 ? ' · ' + (restDist < 30 ? '여기' : restDist + 'm 앞') + ' ' + nr.kind + '에서 쉬어가요(' + (ri+1) + '/' + rs.length + ')' : '';
+  return {main: turn || '이 방향으로 계속 가세요', sub:'남은 거리 ' + (left/1000).toFixed(2) + 'km' + sigNote + restNote, restIdx:ri, restDist, target:rp(run.prog+3), turnAt, turnDist, sigAhead:sg, sigDist:sg != null ? (sg - run.prog)*STEP : null};
 }
 
 function renderRun(){
@@ -1017,6 +1136,10 @@ function renderRun(){
     if (gt.turnAt != null && gt.turnDist <= 75 && run.lastTurn !== gt.turnAt){ run.lastTurn = gt.turnAt; speak(gt.main); }
     if (gt.off && !run.lastOff) speak('코스에서 벗어났어요. 화살표 방향으로 돌아가세요.');
     if (gt.sigAhead != null && gt.sigDist <= 60 && run.lastSig !== gt.sigAhead){ run.lastSig = gt.sigAhead; speak('곧 신호 건널목이에요. 신호를 기다리는 동안은 기록이 멈춰요.'); }
+    if (gt.restIdx >= 0 && gt.restDist != null && gt.restDist < 30 && !run.rests[gt.restIdx].done){
+      run.rests[gt.restIdx].done = true;
+      speak('여기 ' + run.rests[gt.restIdx].kind + '에서 잠깐 쉬어 가요. 휴식 버튼을 누르면 기록이 멈춰요.');
+    }
     if (gt.arrived && !run.arrived){ run.arrived = true; speak('도착했어요. 종료를 눌러 기록을 저장하세요.'); }
     run.lastOff = !!gt.off;
   }
@@ -1055,7 +1178,8 @@ function status(msg){ document.getElementById('runstatus').textContent = msg; }
 function reroute(){
   const nr = OrcaLoop.rejoin(graph(), run.route, run.prog, run.pos.x, run.pos.y);
   if (!nr) return;
-  Object.assign(run, {route:nr, prog:0, off:0, offSince:0, rerouteAt:now(), reroutes:run.reroutes + 1, lastTurn:null, lastSig:null, simI:0});
+  Object.assign(run, {route:nr, prog:0, off:0, offSince:0, rerouteAt:now(), reroutes:run.reroutes + 1, lastTurn:null, lastSig:null, simI:0,
+                      rests:restStops(nr, (run.rests || []).filter(p => !p.done).length).map(p => ({...p, done:false}))}); // 남은 쉬는 횟수를 새 길에 다시 나눈다
   speak('코스를 다시 잡았어요. 화살표 방향으로 가세요.');
   status('코스를 벗어나서, 지금 위치에서 원래 코스로 돌아가는 길을 다시 찾았어요. 남은 거리 ' + (nr.dist/1000).toFixed(2) + 'km');
   draw();
@@ -1130,6 +1254,7 @@ const ACT = {
     if (!r){ status(gen ? '코스를 만드는 중이에요. 잠깐 뒤에 다시 눌러 주세요.' : '먼저 코스를 골라 주세요.'); return; }
     Object.assign(run, {route:r, prog:0, pos:null, heading:null, segs:[[]], dist:0, activeMs:0, restMs:0, stopMs:0, stops:0, auto:false, lastMoveT:0,
                         splits:[], recent:[], follow:true, off:0, lastTurn:null, lastOff:false, arrived:false, climbed:0, offSince:0, rerouteAt:0, reroutes:0,
+                        rests:restStops(r, state.rests).map(p => ({...p, done:false})),
                         label:NAMES[state.sel] + '선 · ' + courseName() + ' ' + (r.dist/1000).toFixed(1) + 'km' + (state.rev ? ' 반대' : ''),
                         meta:{start:state.start, startName:startName(), sx:B.starts.find(x => x.id === state.start).x, sy:B.starts.find(x => x.id === state.start).y,
                               dist:state.dist, terr:state.terr, cells:cells(r)}});
@@ -1197,6 +1322,7 @@ function renderLog(){
 }
 document.getElementById('simbtn').onclick = () => ACT.start(true);
 document.getElementById('awaybtn').onclick = () => {
+  if (!run.route || !run.sim) return;
   const k = Math.floor(run.simI), [x, y] = rp(k), [nx, ny] = rp(k+2), L = Math.hypot(nx-x, ny-y) || 1;
   run.simAway = {x, y, dx:-(ny-y)/L, dy:(nx-x)/L, n:0, route:run.route}; // 진행 방향의 왼쪽 직각
   renderRun();
@@ -1220,13 +1346,23 @@ function renderAll(refit){
   [['출발지로 돌아오기', !state.dest, clearDest]].concat(state.dest ? [[state.dest.label, true, () => {}]] : [])
     .concat([['+ 지도에서 찍기', false, () => { pickMode = 'dest'; startMsg('지도에서 도착할 곳을 한 번 눌러 주세요. 이름으로 찾으려면 위 입력창에 "○○까지"라고 써 주세요.'); }]])
     .forEach(([label, on, fn]) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.setAttribute('aria-pressed', String(on)); b.onclick = fn; sd.appendChild(b); }); seg('seg-dist', DIST_OPTS, 'dist'); seg('seg-terr', TERR_OPTS, 'terr');
+  seg('seg-wx', WX_OPTS, 'wx'); seg('seg-rest', REST_OPTS, 'rests');
+  const sh = document.getElementById('seg-shape'); sh.innerHTML = '';
+  [['없음', null]].concat(Object.keys(SHAPES).map(k => [k, k])).concat(state.shape && !SHAPES[state.shape.name] ? [[state.shape.name, state.shape.name]] : [])
+    .forEach(([label, k]) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+      b.setAttribute('aria-pressed', String((state.shape ? state.shape.name : null) === k));
+      b.onclick = () => { if (!k){ state.shape = null; Object.assign(state, {sel:0, focus:-1}); renderAll(true); } else if (!state.shape || state.shape.name !== k) setShape(k); };
+      sh.appendChild(b);
+    });
+  document.getElementById('wxmsg').textContent = wxNote();
   renderCards(); renderStrip(); renderProfile(); renderBrief();
   if (refit) fit();
   draw();
 }
 new ResizeObserver(() => { resize(); renderProfile(); }).observe(box);
 document.fonts && document.fonts.ready.then(() => draw());
-resize(); applyAsk(); renderRun(); loadHistory();
+resize(); applyAsk(); renderRun(); loadHistory(); loadWeather();
 })();
 </script>
 </body>
