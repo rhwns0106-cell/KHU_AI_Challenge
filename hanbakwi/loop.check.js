@@ -32,6 +32,19 @@ const {prep, near, makeLoops} = globalThis.OrcaLoop;
   assert.deepEqual([nr.pts[2*m-2], nr.pts[2*m-1]], [r.pts[2*n-2], r.pts[2*n-1]], '끝은 원래 출발점');
   assert.equal(nr.el.length, m);
   for (let i = 1; i < m; i++) assert.ok(Math.hypot(nr.pts[2*i] - nr.pts[2*i-2], nr.pts[2*i+1] - nr.pts[2*i-1]) < 120, '끊긴 곳 없이 이어짐');
+  // 출발지 → 목적지: 정문 근처에서 영통역 근처까지, 짧게(1km)와 길게(5km) 요청
+  const [a] = near(P, -470, 400), [b] = near(P, -740, 1110);
+  for (const D of [1000, 5000]){
+    const o = await globalThis.OrcaLoop.makeRoutes(P, a, b, D);
+    console.log('목적지', D, o.flat.map(r => r.dist));
+    assert.ok(o.flat.length >= 1, '목적지 코스가 있어야 함');
+    for (const t in o) for (const r of o[t]){
+      const m = r.pts.length / 2;
+      assert.deepEqual([r.pts[0], r.pts[1]], [P.G.nodes[2*a], P.G.nodes[2*a+1]], '출발지에서 시작');
+      assert.deepEqual([r.pts[2*m-2], r.pts[2*m-1]], [P.G.nodes[2*b], P.G.nodes[2*b+1]], '목적지에서 끝');
+    }
+    if (D === 5000) assert.ok(o.flat.some(r => Math.abs(r.dist - 5000) / 5000 < 0.15), '5km 요청이면 5km 근처 경유 코스가 있어야 함');
+  }
   console.log('다시 붙기: 남은 거리', ((n-1-k)*25/1000).toFixed(2), 'km →', (nr.dist/1000).toFixed(2), 'km');
   console.log('OK');
 })().catch(e => { console.error(e); process.exit(1); });

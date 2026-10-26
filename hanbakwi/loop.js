@@ -106,6 +106,63 @@
     return out;
   }
 
+  // 출발지 → 목적지 코스. 가장 짧은 길, 그와 다른 길(지난 길 1.6배 비용), 원하는 거리가 더 길면
+  // 경유점으로 늘린 길을 후보로 만들고 지형별로 3개씩 고른다. 구조는 makeLoops와 같다.
+  async function makeRoutes(P, s, t, D, tick) {
+    const direct = sp(P, s, t, new Set());
+    if (!direct) return {flat: [], mild: [], hill: [], trail: []};
+    const Ld = direct.es.reduce((a, e) => a + e.L, 0), T = Math.max(D, Ld), raw = [];
+    const add = (path, es, th) => { if (path.length > 1) raw.push({path, es, th}); };
+    add(direct.path, direct.es, -1);
+    // 비슷하지만 다른 길: 이미 쓴 길을 비싸게 쳐서 두 번 더
+    const used = new Set(direct.es.map(e => e.id));
+    for (let k = 0; k < 2; k++) {
+      const p = spCost(P, s, t, e => used.has(e.id) ? 1.6 : 1); if (!p) break;
+      p.es.forEach(e => used.add(e.id)); add(p.path, p.es, -2 - k);
+    }
+    // 원하는 거리가 최단보다 15% 넘게 길면: 출발·도착 중간에서 θ 방향 경유점으로 늘린다
+    if (T > Ld * 1.15) {
+      const x0 = (P.G.nodes[2*s] + P.G.nodes[2*t]) / 2, y0 = (P.G.nodes[2*s+1] + P.G.nodes[2*t+1]) / 2;
+      for (let i = 0; i < 12; i++) {
+        const th = i * Math.PI / 6; let off = (T - Ld) / 2.6, best = null;
+        for (let it = 0; it < 3; it++) {
+          const w = near(P, x0 + off*Math.cos(th), y0 + off*Math.sin(th))[0], pen = new Set();
+          const a = sp(P, s, w, pen); if (!a) break; a.es.forEach(e => pen.add(e.id));
+          const b = sp(P, w, t, pen); if (!b) break;
+          const es = a.es.concat(b.es), L = es.reduce((q, e) => q + e.L, 0);
+          best = {path: a.path.concat(b.path.slice(1)), es, L};
+          if (Math.abs(L - T) / T < 0.08) break;
+          off *= Math.max(0.3, Math.min(3, 1 + (T - L) / Math.max(L - Ld, 200)));
+        }
+        if (best && Math.abs(best.L - T) / T < 0.15) add(best.path, best.es, th);
+        if (tick) { tick((i + 1) / 12); await new Promise(r => setTimeout(r)); }
+      }
+    }
+    const cands = raw.map(c => {
+      let L = 0, rep = 0, trail = 0, steps = 0; const seen = new Set();
+      for (const e of c.es) { L += e.L; if (seen.has(e.id)) rep += e.L; seen.add(e.id); if (e.f & 1) trail += e.L; if (e.f & 2) steps++; }
+      const r = finish(P, {path: c.path, L, rep: rep / L, trail: trail / L, steps, th: c.th}); r.fit = Math.abs(L - T) / T; return r;
+    }).filter(c => c.rep <= 0.25);
+    const score = {flat: c => c.apk + c.fit*40 + c.steps*3, mild: c => Math.abs(c.apk - 12) + c.fit*40 + c.steps*3,
+                   hill: c => -c.apk + c.fit*40, trail: c => -c.trail*40 + c.fit*40};
+    const out = {};
+    for (const k in score) {
+      const pick = [];
+      for (const c of cands.slice().sort((a, b) => score[k](a) - score[k](b))) {
+        if (pick.every(q => Math.abs(q.dist - c.dist) > 60 || Math.abs(q.asc - c.asc) > 3)) pick.push(c); // 같은 길 중복 제외
+        if (pick.length === 3) break;
+      }
+      out[k] = pick;
+    }
+    return out;
+  }
+  // 간선 비용에 배수를 곱한 최단경로(다른 길 찾기용)
+  function spCost(P, s, t, mul) {
+    const pen = {has: () => false}, save = P.adj;
+    P.adj = save.map(a => { const b = a.slice(); for (let k = 1; k < b.length; k += 2) b[k] = Object.assign({}, b[k], {w: b[k].w * mul(b[k])}); return b; });
+    try { return sp(P, s, t, pen); } finally { P.adj = save; }
+  }
+
   // 달리다 코스를 벗어났을 때: 지금 위치에서 앞쪽 남은 코스(100m~1km) 중 가장 덜 돌아가는 지점으로 붙는 길을 찾고,
   // 그 뒤는 원래 코스를 그대로 잇는다. 앞쪽만 보므로 출발점으로 돌아오는 순환은 유지된다.
   function rejoin(P, r, prog, x, y) {
@@ -123,5 +180,5 @@
                                  dist: Math.round(best.L + (n - 1 - best.i) * STEP), rerouted: true});
   }
 
-  root.OrcaLoop = {prep, near, makeLoops, rejoin};
+  root.OrcaLoop = {prep, near, makeLoops, makeRoutes, rejoin};
 })(typeof window !== 'undefined' ? window : globalThis);

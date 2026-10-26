@@ -193,7 +193,7 @@ canvas.drag{cursor:grabbing}
     <header class="brand">
       <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="10" fill="none" stroke="var(--porcelain)" stroke-width="5"/></svg>
       <h1>orca</h1>
-      <p>경희대 국제캠 순환 코스</p>
+      <p>경희대 국제캠 러닝 코스</p>
     </header>
 
     <form class="ask" id="askform">
@@ -207,6 +207,7 @@ canvas.drag{cursor:grabbing}
 
     <div class="controls">
       <div class="ctl"><span id="l-start">출발지</span><div class="seg" id="seg-start" role="group" aria-labelledby="l-start"></div></div>
+      <div class="ctl"><span id="l-dest">도착</span><div class="seg" id="seg-dest" role="group" aria-labelledby="l-dest"></div></div>
       <p class="refine-msg" id="startmsg" aria-live="polite"></p>
       <div class="ctl"><span id="l-dist">거리</span><div class="seg" id="seg-dist" role="group" aria-labelledby="l-dist"></div></div>
       <div class="ctl"><span id="l-terr">지형</span><div class="seg" id="seg-terr" role="group" aria-labelledby="l-terr"></div></div>
@@ -282,7 +283,7 @@ const PACE = 6.5; // 분/km, 예상 시간 계산용
 const STEP = 25;  // 고도 표본 간격(m)
 const NAMES = ['A','B','C'];
 
-const state = {start:'gate', dist:5, terr:'flat', sel:0, budget:null, focus:-1, rev:false};
+const state = {start:'gate', dist:5, terr:'flat', sel:0, budget:null, focus:-1, rev:false, dest:null};
 
 /* 모바일에서는 지도를 패널 안 입력 아래로, 데스크톱에서는 오른쪽 전체로 */
 const box = document.getElementById('mapbox'), slot = document.getElementById('mapslot'), app = document.querySelector('.app');
@@ -346,6 +347,7 @@ async function applyAsk(){
   }
   if (it.repeat_last) await useLastRun(!!(a && (a.km || a.minutes)));
   if (it.here) useMyLocation(); else if (it.place) await findPlace(it.place);
+  if (a){ if (a.dest) await findPlace(a.dest, 'dest'); else clearDest(); } // 새 요청에 목적지가 없으면 순환으로
   if (it.novel) await pickNovel(a && a.terrain);
 }
 
@@ -377,7 +379,7 @@ async function useLastRun(keepDist){
 // 그 지형 안에서 모두 절반 넘게 겹칠 때만 다른 지형까지 넓힌다(평지 찾던 사람에게 갑자기 산길을 주지 않게)
 async function pickNovel(terr){
   await ensureRoutes();
-  const bestIn = ts => { let b = null; ts.forEach(t => (R[state.start+'|'+state.dist+'|'+t] || []).forEach((r, i) => {
+  const bestIn = ts => { let b = null; ts.forEach(t => (R[rkey(state.dist, t)] || []).forEach((r, i) => {
     const o = overlap(r); if (!b || o < b.o) b = {t, i, o}; })); return b; };
   let best = bestIn([terr || state.terr]);
   if (!terr && (!best || best.o > 0.5)){ const wide = bestIn(TERR_OPTS.map(o => o[0])); if (wide && (!best || wide.o < best.o)) best = wide; }
@@ -398,7 +400,7 @@ function setCustom(name, x, y){
   const [node, d] = OrcaLoop.near(graph(), x, y);
   if (d > 300){ startMsg('그곳은 orca가 길을 아는 지역(국제캠 주변 약 4km) 밖이에요.'); return; }
   const G = graph().G, label = name.length > 12 ? name.slice(0, 12) + '…' : name;
-  Object.keys(R).forEach(k => { if (k.startsWith('custom|')) delete R[k]; });
+  Object.keys(R).forEach(k => { if (k.startsWith('custom')) delete R[k]; });
   [START_OPTS, B.starts].forEach(a => { const i = a.findIndex(o => (o.id || o[0]) === 'custom'); if (i >= 0) a.splice(i, 1); });
   START_OPTS.unshift(['custom', label]);
   B.starts.unshift({id:'custom', name:label, x:G.nodes[2*node], y:G.nodes[2*node+1], node});
@@ -414,7 +416,8 @@ function useMyLocation(){
     {enableHighAccuracy:true, timeout:15000});
 }
 // 장소 이름 → 좌표: OpenStreetMap 검색(Nominatim), 지원 지역 안에서만 찾는다
-async function findPlace(name){
+async function findPlace(name, role = 'start'){
+  const put = (nm, x, y) => role === 'dest' ? setDest(nm, x, y) : setCustom(nm, x, y);
   startMsg('"' + name + '"을(를) 지도에서 찾는 중이에요…');
   // 1순위 카카오(가게까지 촘촘함). "영통역점"처럼 없는 지점명이면 "점"을 뗀 검색도 합쳐서 본다
   try {
@@ -427,11 +430,11 @@ async function findPlace(name){
     // 말한 낱말이 이름에 모두 들어 있으면 그곳으로, 아니면 후보를 보여주고 고르게 한다(엉뚱한 지점으로 가지 않게)
     const words = name.split(/\s+/).map(w => w.replace(/점$/, '')).filter(Boolean);
     const exact = places.find(p => words.every(w => p.name.replace(/\s/g, '').includes(w)));
-    const go = p => { setCustom(p.name, (p.lon - LO0)*KX, (p.lat - LA0)*KY); if (state.start === 'custom') startMsg('카카오맵에서 찾은 곳: ' + p.name + ' (' + p.address + ')'); };
+    const go = p => { put(p.name, (p.lon - LO0)*KX, (p.lat - LA0)*KY); startMsg('카카오맵에서 찾은 ' + (role === 'dest' ? '도착지' : '출발지') + ': ' + p.name + ' (' + p.address + ')'); };
     if (exact) return go(exact);
     if (places.length){
       const box = document.getElementById('startmsg');
-      box.textContent = '"' + name + '"과 이름이 똑같은 곳은 없어요. 어디서 출발할까요? ';
+      box.textContent = '"' + name + '"과 이름이 똑같은 곳은 없어요. ' + (role === 'dest' ? '어디까지 갈까요? ' : '어디서 출발할까요? ');
       places.slice(0, 4).forEach(p => {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'linkbtn';
         b.textContent = p.name; b.title = p.address; b.style.marginRight = '10px'; b.onclick = () => go(p);
@@ -445,21 +448,30 @@ async function findPlace(name){
     try {
       const u = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=ko&countrycodes=kr&bounded=1&viewbox=127.0558,37.2642,127.1078,37.2222&q=' + encodeURIComponent(q);
       const r = (await (await fetch(u)).json())[0];
-      if (r) return setCustom(name, (+r.lon - LO0)*KX, (+r.lat - LA0)*KY);
+      if (r) return put(name, (+r.lon - LO0)*KX, (+r.lat - LA0)*KY);
     } catch(e){}
   }
   startMsg('"' + name + '"을(를) 지도에서 못 찾았어요. "지도에서 찍기"로 직접 골라 주세요.');
 }
 // 내가 정한 출발지는 코스를 미리 만들어 두지 않았으니, 거리가 바뀔 때마다 그 자리에서 만든다
 function ensureRoutes(){
-  if (state.start !== 'custom' || R['custom|'+state.dist+'|flat']) return Promise.resolve();
+  if ((state.start !== 'custom' && !state.dest) || R[rkey(state.dist, 'flat')]) return Promise.resolve();
   if (gen) return gen;
-  const D = state.dist, st = B.starts.find(s => s.id === 'custom'); genPct = 0;
-  return gen = OrcaLoop.makeLoops(graph(), st.node, D*1000, p => { genPct = p; renderCards(); }).then(out => {
-    for (const t in out) R['custom|'+D+'|'+t] = out[t];
-    gen = null; renderAll(true);
-  });
+  const D = state.dist, key = rkey(D, ''), st = B.starts.find(x => x.id === state.start);
+  const s = st.node != null ? st.node : OrcaLoop.near(graph(), st.x, st.y)[0], tick = p => { genPct = p; renderCards(); };
+  genPct = 0;
+  const job = state.dest ? OrcaLoop.makeRoutes(graph(), s, state.dest.node, D*1000, tick) : OrcaLoop.makeLoops(graph(), s, D*1000, tick);
+  return gen = job.then(out => { for (const t in out) R[key + t] = out[t]; gen = null; renderAll(true); });
 }
+// 목적지: 순환 대신 여기까지 가는 코스
+function setDest(name, x, y){
+  const [node, d] = OrcaLoop.near(graph(), x, y);
+  if (d > 300){ startMsg('그 목적지는 orca가 길을 아는 지역(국제캠 주변 약 4km) 밖이에요.'); return; }
+  const G = graph().G, nx = G.nodes[2*node], ny = G.nodes[2*node+1];
+  state.dest = {name, label:name.length > 12 ? name.slice(0, 12) + '…' : name, x:nx, y:ny, node, key:nx + ',' + ny};
+  Object.assign(state, {sel:0, focus:-1}); startMsg(''); renderAll(true);
+}
+function clearDest(){ if (state.dest){ state.dest = null; Object.assign(state, {sel:0, focus:-1}); renderAll(true); } }
 function applyParsed(p, source, extra = []){
   const chips = [...extra];
   state.budget = p.min || null;
@@ -501,7 +513,7 @@ document.getElementById('refineform').addEventListener('submit', async e => {
   const request = document.getElementById('rq').value.trim(), msg = document.getElementById('refinemsg');
   if (!request) return;
   const options = {};
-  DIST_OPTS.forEach(([d]) => TERR_OPTS.forEach(([t]) => (R[state.start+'|'+d+'|'+t] || []).map(r => directed(r, state.rev)).forEach((r, i) => {
+  DIST_OPTS.forEach(([d]) => TERR_OPTS.forEach(([t]) => (R[rkey(d, t)] || []).map(r => directed(r, state.rev)).forEach((r, i) => {
     const n = r.el.length;
     options[d+'|'+t+'|'+i] = {km:+(r.dist/1000).toFixed(2), min:eta(r).min, signals:eta(r).sig, ascent_m:r.asc, max_grade:Math.round(r.maxg),
       flat_pct:Math.round(r.share[0]*100), first_km_ascent:climbBetween(r, 0, 40), last_km_ascent:climbBetween(r, n-41, n-1), trail_pct:Math.round(r.trail*100)};
@@ -539,8 +551,11 @@ function directed(r, rev){
   let asc = 0; for (let i = 1; i < n; i++) asc += Math.max(0, el[i] - el[i-1]);
   return c[rev] = Object.assign(o, {share:cnt.map(k => k/n), asc:Math.round(asc), maxg:Math.max(0, ...g)});
 }
-function current(){ return (R[state.start + '|' + state.dist + '|' + state.terr] || []).map(r => directed(r, state.rev)); }
+function rkey(d = state.dist, t = state.terr){ return state.start + (state.dest ? '>' + state.dest.key : '') + '|' + d + '|' + t; }
+function current(){ return (R[rkey()] || []).map(r => directed(r, state.rev)); }
 function startName(){ return START_OPTS.find(s=>s[0]===state.start)[1]; }
+function endName(){ return state.dest ? state.dest.label : startName(); }
+function courseName(){ return state.dest ? startName() + ' → ' + endName() : startName() + ' 순환'; }
 
 /* ---------- 지도 ---------- */
 const cv = document.getElementById('map'), ctx = cv.getContext('2d');
@@ -574,11 +589,11 @@ function ring(x, y, r, w, stroke){
   ctx.lineWidth = w; ctx.strokeStyle = stroke; ctx.stroke();
 }
 /* ---------- 바탕 지도 타일: 브이월드(국토교통부) 어두운 지도 · 위성. 인증키가 없으면 직접 그린 벡터 지도만 ---------- */
-const VWORLD_KEY = ''; // 브이월드 인증키(서비스 URL로 도메인 제한됨). 받으면 넣는다
+const VWORLD_KEY = '5E2D4C89-5C01-40D0-B843-AE793FBF687E'; // 브이월드 인증키: 등록한 서비스 URL(orca-khu.vercel.app)에서만 동작해 공개돼도 됨
 const BASES = {
   dark:{label:'기본', attr:'© 국토교통부 브이월드',
         urls:[(z,x,y) => 'https://api.vworld.kr/req/wmts/1.0.0/' + VWORLD_KEY + '/midnight/' + z + '/' + y + '/' + x + '.png']},
-  sat:{label:'위성', attr:'© 국토교통부 브이월드 · © OpenStreetMap',
+  sat:{label:'위성', attr:'© 국토교통부 브이월드',
        urls:[(z,x,y) => 'https://api.vworld.kr/req/wmts/1.0.0/' + VWORLD_KEY + '/Satellite/' + z + '/' + y + '/' + x + '.jpeg',
              (z,x,y) => 'https://api.vworld.kr/req/wmts/1.0.0/' + VWORLD_KEY + '/Hybrid/' + z + '/' + y + '/' + x + '.png']}
 };
@@ -672,6 +687,13 @@ function draw(){
   }
   ctx.setTransform(dpr,0,0,dpr,0,0);
   drawRun();
+  if (state.dest){ // 도착지: 코발트 큰 원
+    const [x, y] = toScreen(state.dest.x, state.dest.y);
+    ring(x, y, 11, 6, css('--cobalt-ink'));
+    ctx.font = '800 13px ' + css('--kr').split(',')[0]; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 4; ctx.strokeStyle = css('--ground'); ctx.strokeText('도착 · ' + state.dest.label, x+16, y);
+    ctx.fillStyle = css('--cobalt-ink'); ctx.fillText('도착 · ' + state.dest.label, x+16, y);
+  }
   // 출발지: 선택은 환승역 큰 원
   B.starts.forEach(st => {
     const [x,y] = toScreen(st.x, st.y), on = st.id === state.start;
@@ -713,8 +735,9 @@ cv.addEventListener('pointermove', e => {
 let tap0 = null;
 function up(e){
   if (pickMode && tap0 && Math.hypot(e.offsetX - tap0[0], e.offsetY - tap0[1]) < 6){
+    const wx = view.cx + (e.offsetX - cv.width/dpr/2)/view.s, wy = view.cy - (e.offsetY - cv.height/dpr/2)/view.s;
+    if (pickMode === 'dest') setDest('지도에서 고른 도착지', wx, wy); else setCustom('지도에서 고른 곳', wx, wy);
     pickMode = false;
-    setCustom('지도에서 고른 곳', view.cx + (e.offsetX - cv.width/dpr/2)/view.s, view.cy - (e.offsetY - cv.height/dpr/2)/view.s);
   }
   ptrs.delete(e.pointerId); pinch0 = null; if (!ptrs.size) cv.classList.remove('drag'); }
 cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
@@ -724,10 +747,11 @@ document.getElementById('zout').onclick = () => zoomAt(1/1.4, cv.width/dpr/2, cv
 document.getElementById('basebtn').onclick = e => {
   base = base === 'dark' ? 'sat' : 'dark';
   e.target.textContent = base === 'dark' ? '위성' : '기본';
-  document.getElementById('attr').textContent = BASES[base].attr + ' · SRTM';
+  document.getElementById('attr').textContent = BASES[base].attr + ' · © OpenStreetMap · SRTM';
   draw();
 };
 document.getElementById('basebtn').hidden = !VWORLD_KEY;
+if (VWORLD_KEY) document.getElementById('attr').textContent = BASES[base].attr + ' · © OpenStreetMap · SRTM';
 document.getElementById('fit').onclick = () => { state.focus = -1; fit(); renderStrip(); draw(); };
 
 /* 역으로 날아가기: 짧게 감속하며 이동 */
@@ -748,7 +772,7 @@ function flyTo(x, y){
 function stations(r){
   const n = r.el.length, per = 1000/STEP, out = [{i:0, label:startName(), term:true}];
   for (let k=1; k*per < n-per*0.4; k++) out.push({i:k*per, label:k+'km', km:k});
-  out.push({i:n-1, label:startName(), term:true});
+  out.push({i:n-1, label:endName(), term:true});
   return out;
 }
 const SIG = window.ORCA_SIGNALS || [];
@@ -768,7 +792,7 @@ function eta(r){
 function etaNote(e){ return (e.sig ? '신호 ' + e.sig + '곳(대기 약 ' + Math.max(1, e.waitMin) + '분)' : '신호 없음') + (e.climbMin ? ' · 오르막 +' + e.climbMin + '분' : ''); }
 function renderStrip(){
   const r = current()[state.sel], line = document.getElementById('line');
-  document.getElementById('strip-title').textContent = r ? NAMES[state.sel] + '선 · ' + startName() + ' 순환' + (state.rev ? ' (반대 방향)' : '') : '코스 없음';
+  document.getElementById('strip-title').textContent = r ? NAMES[state.sel] + '선 · ' + courseName() + (state.rev ? ' (반대 방향)' : '') : '코스 없음';
   const bud = document.getElementById('budget'), shares = document.getElementById('shares');
   if (!r){ line.innerHTML = ''; bud.textContent = ''; shares.innerHTML = ''; return; }
   const e = eta(r), mins = e.min;
@@ -790,7 +814,7 @@ function renderStrip(){
     b.type = 'button'; b.className = 'stn' + (s.term ? ' term' : '');
     b.style.left = (s.i/(n-1)*100) + '%';
     b.setAttribute('aria-pressed', String(s.i === state.focus));
-    b.setAttribute('aria-label', s.term ? startName() + ' (출발·도착)' : s.km + 'km 지점으로 지도 이동');
+    b.setAttribute('aria-label', s.term ? (s.i ? endName() + ' (도착)' : startName() + ' (출발)') : s.km + 'km 지점으로 지도 이동');
     b.innerHTML = '<i></i><span>' + (s.term ? (s.i ? '도착' : '출발') : s.label) + '</span>';
     b.addEventListener('click', () => {
       state.focus = s.i; renderStrip();
@@ -802,14 +826,14 @@ function renderStrip(){
 }
 function renderCards(){
   const rs = current(), el = document.getElementById('cards');
-  if (!rs.length){ el.innerHTML = '<p class="empty">' + (gen ? '이 출발지에서 돌아오는 코스를 실제 길 위에 만드는 중이에요… ' + Math.round(genPct*100) + '%' : '이 조건에 맞는 코스가 아직 없어요. 거리나 지형을 바꿔보세요.') + '</p>'; return; }
+  if (!rs.length){ el.innerHTML = '<p class="empty">' + (gen ? '코스를 실제 길 위에 만드는 중이에요… ' + Math.round(genPct*100) + '%' : '이 조건에 맞는 코스가 아직 없어요. 거리나 지형을 바꿔보세요.') + '</p>'; return; }
   el.innerHTML = '';
   rs.forEach((r, i) => {
     const b = document.createElement('button'); b.type='button'; b.className='course';
     b.setAttribute('aria-pressed', String(i === state.sel));
     b.innerHTML =
       '<span class="badge">' + NAMES[i] + '</span>' +
-      '<span><b>' + NAMES[i] + '선 · ' + startName() + ' 순환</b>' +
+      '<span><b>' + NAMES[i] + '선 · ' + courseName() + '</b>' +
       '<small>' + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · 상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small></span>' +
       '<span class="km">' + (r.dist/1000).toFixed(2) + '<em>km</em></span>';
     b.addEventListener('click', () => { state.sel = i; state.focus = -1; renderAll(false); });
@@ -840,7 +864,7 @@ function renderBrief(){
   if (!r){ ul.innerHTML=''; return; }
   const g = grades(r), n = g.length, lines = [];
   const flatPct = Math.round(r.share[0]*100), hardPct = Math.round((r.share[2]+r.share[3])*100);
-  lines.push('총 ' + (r.dist/1000).toFixed(1) + 'km, 6분 30초 페이스에 신호·오르막을 더해 약 ' + eta(r).min + '분. 출발한 곳으로 돌아오는 코스예요.');
+  lines.push('총 ' + (r.dist/1000).toFixed(1) + 'km, 6분 30초 페이스에 신호·오르막을 더해 약 ' + eta(r).min + '분. ' + (state.dest ? endName() + '까지 가는 코스예요.' : '출발한 곳으로 돌아오는 코스예요.'));
   let best = null, st = -1;
   for (let i=0;i<=n;i++){
     const upHill = i<n && g[i] > 3;
@@ -855,18 +879,18 @@ function renderBrief(){
   if (r.steps > 0) lines.push('계단 구간이 ' + r.steps + '곳 있어요.');
   ul.innerHTML = lines.map(l => '<li>'+l+'</li>').join('');
   // 경로·경사 수치는 계산값 그대로 넘기고, 문장만 ChatKHU가 쓴다
-  const key = state.start+'|'+state.dist+'|'+state.terr+'|'+state.sel, note = document.getElementById('briefsrc');
+  const key = rkey()+'|'+state.sel+'|'+state.rev, note = document.getElementById('briefsrc');
   const show = ls => { ul.innerHTML = ls.map(l => '<li>'+String(l).replace(/</g,'&lt;')+'</li>').join(''); note.textContent = 'ChatKHU가 위 코스 수치만 보고 쓴 브리핑이에요. 경로와 경사는 계산값입니다.'; };
   if (briefCache[key]) return show(briefCache[key]);
   note.textContent = 'ChatKHU가 브리핑을 쓰는 중이에요. 지금 문장은 규칙으로 만든 임시 문장입니다.';
-  ai('brief', {route:{start:startName(), dist_km:+(r.dist/1000).toFixed(2), minutes:eta(r).min, signals:eta(r).sig, ascent_m:r.asc, max_grade_pct:Math.round(r.maxg),
+  ai('brief', {route:{start:startName(), destination:state.dest ? endName() : '출발지로 돌아오는 순환', dist_km:+(r.dist/1000).toFixed(2), minutes:eta(r).min, signals:eta(r).sig, ascent_m:r.asc, max_grade_pct:Math.round(r.maxg),
       share_pct:{flat:flatPct, mild:Math.round(r.share[1]*100), up:Math.round(r.share[2]*100), steep:Math.round(r.share[3]*100), down:Math.round(r.share[4]*100)}, direction:state.rev ? '반대 방향' : '기본 방향',
       longest_climb: best ? {at_km:+(best.s*STEP/1000).toFixed(1), length_m:Math.round(best.len/10)*10, rise_m:Math.round(best.rise)} : null,
       trail_pct:Math.round(r.trail*100), steps:r.steps, time_budget_min:state.budget}})
     .then(ls => {
-      if (!Array.isArray(ls) || !ls.length){ if (key === state.start+'|'+state.dist+'|'+state.terr+'|'+state.sel) note.textContent = 'ChatKHU에 연결하지 못해 규칙으로 만든 문장을 보여드려요.'; return; }
+      if (!Array.isArray(ls) || !ls.length){ if (key === rkey()+'|'+state.sel+'|'+state.rev) note.textContent = 'ChatKHU에 연결하지 못해 규칙으로 만든 문장을 보여드려요.'; return; }
       briefCache[key] = ls;
-      if (key === state.start+'|'+state.dist+'|'+state.terr+'|'+state.sel) show(ls);
+      if (key === rkey()+'|'+state.sel+'|'+state.rev) show(ls);
     });
 }
 const briefCache = {};
@@ -1070,14 +1094,14 @@ const ACT = {
     if (!r){ status('먼저 코스를 골라 주세요.'); return; }
     Object.assign(run, {route:r, prog:0, pos:null, heading:null, segs:[[]], dist:0, activeMs:0, restMs:0, stopMs:0, stops:0, auto:false, lastMoveT:0,
                         splits:[], recent:[], follow:true, off:0, lastTurn:null, lastOff:false, arrived:false, climbed:0, offSince:0, rerouteAt:0, reroutes:0,
-                        label:NAMES[state.sel] + '선 · ' + startName() + ' ' + (r.dist/1000).toFixed(1) + 'km' + (state.rev ? ' 반대' : ''),
+                        label:NAMES[state.sel] + '선 · ' + courseName() + ' ' + (r.dist/1000).toFixed(1) + 'km' + (state.rev ? ' 반대' : ''),
                         meta:{start:state.start, startName:startName(), sx:B.starts.find(x => x.id === state.start).x, sy:B.starts.find(x => x.id === state.start).y,
                               dist:state.dist, terr:state.terr, cells:cells(r)}});
     run.mode = 'running';
     if (!startTracking(sim === true)){ run.mode = 'idle'; renderRun(); return; }
     run.since = now(); keepAwake(); renderRun();
     document.getElementById('report').hidden = true;
-    speak('출발합니다. ' + (r.dist/1000).toFixed(1) + '킬로미터 순환 코스예요.'); // 시작 버튼 탭이 있어야 휴대폰에서 음성이 나온다
+    speak('출발합니다. ' + (r.dist/1000).toFixed(1) + '킬로미터 ' + (state.dest ? endName() + '까지 가는' : '순환') + ' 코스예요.'); // 시작 버튼 탭이 있어야 휴대폰에서 음성이 나온다
   },
   rest(){ const t = now(); if (run.auto){ run.stopMs += t - run.since; run.auto = false; } else run.activeMs += t - run.since; run.since = t; run.mode = 'paused'; renderRun(); },
   resume(){ const t = now(); run.restMs += t - run.since; run.since = t; run.lastMoveT = t; run.mode = 'running'; run.segs.push([]); renderRun(); },
@@ -1146,10 +1170,15 @@ setInterval(() => { if (run.mode !== 'idle'){ autoCheck(); renderRun(); } }, 100
 function renderAll(refit){
   ensureRoutes();
   seg('seg-start', START_OPTS, 'start');
-  [['내 위치', useMyLocation], ['지도에서 찍기', () => { pickMode = true; startMsg('지도에서 출발할 곳을 한 번 눌러 주세요.'); }]].forEach(([label, fn]) => {
+  [['내 위치', useMyLocation], ['지도에서 찍기', () => { pickMode = 'start'; startMsg('지도에서 출발할 곳을 한 번 눌러 주세요.'); }]].forEach(([label, fn]) => {
     const b = document.createElement('button'); b.type = 'button'; b.textContent = '+ ' + label; b.onclick = fn;
     document.getElementById('seg-start').appendChild(b);
-  }); seg('seg-dist', DIST_OPTS, 'dist'); seg('seg-terr', TERR_OPTS, 'terr');
+  });
+  // 도착: 출발지로 돌아오기(순환) / 정한 목적지 / 지도에서 찍기
+  const sd = document.getElementById('seg-dest'); sd.innerHTML = '';
+  [['출발지로 돌아오기', !state.dest, clearDest]].concat(state.dest ? [[state.dest.label, true, () => {}]] : [])
+    .concat([['+ 지도에서 찍기', false, () => { pickMode = 'dest'; startMsg('지도에서 도착할 곳을 한 번 눌러 주세요. 이름으로 찾으려면 위 입력창에 "○○까지"라고 써 주세요.'); }]])
+    .forEach(([label, on, fn]) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.setAttribute('aria-pressed', String(on)); b.onclick = fn; sd.appendChild(b); }); seg('seg-dist', DIST_OPTS, 'dist'); seg('seg-terr', TERR_OPTS, 'terr');
   renderCards(); renderStrip(); renderProfile(); renderBrief();
   if (refit) fit();
   draw();
