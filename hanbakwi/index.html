@@ -146,6 +146,17 @@ canvas.drag{cursor:grabbing}
 .runlog{margin:0;padding:0;list-style:none;font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
 .runlog b{color:var(--porcelain);font-family:var(--num);font-size:15px;font-weight:600}
 
+.report{display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid var(--rule);border-radius:10px;background:var(--panel)}
+.report h3{margin:0;font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
+.report p{margin:0}
+.feel{display:flex;gap:8px;flex-wrap:wrap}
+.feel button{flex:1;min-height:44px;border:1px solid var(--rule);background:transparent;border-radius:999px;font-weight:700;cursor:pointer}
+.feel button:hover{border-color:var(--cobalt-ink)}
+.refine{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.refine-msg{margin:0;font-size:14px;color:var(--muted);min-height:20px}
+.mic{display:grid;place-items:center;width:44px;border:0;background:transparent;cursor:pointer;color:var(--muted)}
+.mic[aria-pressed="true"]{color:var(--steep)}
+
 @media (min-width:960px){
   .app{flex-direction:row;height:100vh;height:100dvh;overflow:hidden}
   .panel{flex:0 0 432px;overflow-y:auto;padding:22px 24px 32px;border-right:1px solid var(--rule)}
@@ -183,6 +194,7 @@ canvas.drag{cursor:grabbing}
     <form class="ask" id="askform">
       <div class="ask-row">
         <label><span class="sr">원하는 코스를 말로 입력</span><input id="q" type="text" autocomplete="off" value="공강 30분인데 오르막 싫어, 정문에서 출발" placeholder="예: 40분, 평지로, 영통역에서 출발"></label>
+        <button class="mic" id="mic" type="button" aria-label="말로 입력" aria-pressed="false" hidden><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="2" width="6" height="11" rx="3" fill="currentColor"/><path d="M4 10a6 6 0 0 0 12 0M10 16v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
         <button class="go" type="submit">코스 찾기<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div>
       <div class="parsed" id="parsed" aria-live="polite"></div>
@@ -204,6 +216,13 @@ canvas.drag{cursor:grabbing}
 
     <section aria-label="추천 코스">
       <div class="courses" id="cards"></div>
+      <form class="refine ask" id="refineform">
+        <div class="ask-row">
+          <label><span class="sr">코스를 어떻게 바꿀지 말로 입력</span><input id="rq" type="text" autocomplete="off" placeholder="예: 마지막 오르막 빼줘, 신호 적은 길로"></label>
+          <button class="go" type="submit">AI로 고치기</button>
+        </div>
+        <p class="refine-msg" id="refinemsg" aria-live="polite"></p>
+      </form>
     </section>
 
     <section class="run" aria-labelledby="run-title">
@@ -216,11 +235,13 @@ canvas.drag{cursor:grabbing}
         <div><b id="r-time">0:00</b><span>달린 시간</span></div>
         <div><b id="r-dist">0.00</b><span>거리 km</span></div>
         <div><b id="r-pace">--</b><span>현재 페이스</span></div>
-        <div><b id="r-rest">0:00</b><span>휴식</span></div>
+        <div><b id="r-rest">0:00</b><span id="r-rest-l">휴식·정지</span></div>
       </div>
       <div class="run-btns" id="runbtns"></div>
       <p class="runstatus" id="runstatus">시작을 누르면 GPS로 내 위치를 따라가며 다음에 갈 방향을 알려줘요. 화면을 켜 둔 채로 달려 주세요.</p>
       <button class="linkbtn" id="simbtn" type="button">GPS 없이 시뮬레이션으로 시험하기</button>
+      <button class="linkbtn" id="voicebtn" type="button" aria-pressed="true">음성 안내 켜짐</button>
+      <div class="report" id="report" hidden aria-live="polite"></div>
       <ul class="runlog" id="runlog"></ul>
     </section>
 
@@ -240,6 +261,7 @@ canvas.drag{cursor:grabbing}
 </div>
 
 <script src="data.js"></script>
+<script src="signals.js"></script>
 <script>
 (function(){
 const DATA = window.HANBAKWI_DATA;
@@ -321,6 +343,39 @@ function applyParsed(p, source){
   renderAll(true);
 }
 document.getElementById('askform').addEventListener('submit', e => { e.preventDefault(); applyAsk(); });
+
+/* 말로 주문: 브라우저 음성 인식(크롬·사파리). 지원 안 하면 버튼을 숨긴 채 둔다 */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition, mic = document.getElementById('mic');
+if (SR){
+  mic.hidden = false;
+  mic.onclick = () => {
+    const rec = new SR(); rec.lang = 'ko-KR'; rec.interimResults = false;
+    mic.setAttribute('aria-pressed', 'true');
+    rec.onresult = e => { document.getElementById('q').value = e.results[0][0].transcript; applyAsk(); };
+    rec.onend = () => mic.setAttribute('aria-pressed', 'false');
+    rec.start();
+  };
+}
+
+/* 대화로 코스 고치기: 지금 출발지의 모든 후보 수치를 주고 ChatKHU가 하나를 고른다 */
+document.getElementById('refineform').addEventListener('submit', async e => {
+  e.preventDefault();
+  const request = document.getElementById('rq').value.trim(), msg = document.getElementById('refinemsg');
+  if (!request) return;
+  const options = {};
+  DIST_OPTS.forEach(([d]) => TERR_OPTS.forEach(([t]) => (R[state.start+'|'+d+'|'+t] || []).forEach((r, i) => {
+    const n = r.el.length;
+    options[d+'|'+t+'|'+i] = {km:+(r.dist/1000).toFixed(2), min:eta(r).min, signals:eta(r).sig, ascent_m:r.asc, max_grade:Math.round(r.maxg),
+      flat_pct:Math.round(r.share[0]*100), first_km_ascent:climbBetween(r, 0, 40), last_km_ascent:climbBetween(r, n-41, n-1), trail_pct:Math.round(r.trail*100)};
+  })));
+  msg.textContent = 'ChatKHU가 후보 ' + Object.keys(options).length + '개 중에서 고르는 중이에요…';
+  const a = await ai('refine', {request, now:state.dist+'|'+state.terr+'|'+state.sel, options});
+  if (!a || !options[a.pick]){ msg.textContent = 'ChatKHU에 연결하지 못했어요. 거리·지형 버튼으로 직접 바꿔 주세요.'; return; }
+  const [d, t, i] = a.pick.split('|');
+  Object.assign(state, {dist:+d, terr:t, sel:+i, focus:-1});
+  renderAll(true);
+  msg.textContent = NAMES[+i] + '선 · ' + d + 'km ' + TERR_OPTS.find(o => o[0] === t)[1] + ' — ' + a.reason;
+});
 
 /* ---------- 경사 ---------- */
 function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
@@ -488,17 +543,31 @@ function stations(r){
   out.push({i:n-1, label:startName(), term:true});
   return out;
 }
-function fmtMin(km){ return Math.round(km*PACE); }
+const SIG = window.ORCA_SIGNALS || [];
+const etaCache = new WeakMap();
+// 예상 시간 = 거리×페이스 + 오르막(상승 10m당 14초: 경사 1%마다 약 3.5% 느려진다는 근사, 6'30" 기준)
+//           + 신호(교차로당 기대 대기 20초: 절반은 초록불, 빨간불이면 평균 40초로 가정)
+function eta(r){
+  if (etaCache.has(r)) return etaCache.get(r);
+  let sig = 0;
+  for (let j = 0; j < SIG.length; j += 2)
+    for (let i = 0; i < r.pts.length; i += 2)
+      if (Math.abs(r.pts[i]-SIG[j]) < 20 && Math.abs(r.pts[i+1]-SIG[j+1]) < 20){ sig++; break; }
+  const base = r.dist/1000*PACE*60, climb = r.asc*1.4, wait = sig*20;
+  const o = {min:Math.round((base+climb+wait)/60), sig, climbMin:Math.round(climb/60), waitMin:Math.round(wait/60)};
+  etaCache.set(r, o); return o;
+}
+function etaNote(e){ return (e.sig ? '신호 ' + e.sig + '곳(대기 약 ' + Math.max(1, e.waitMin) + '분)' : '신호 없음') + (e.climbMin ? ' · 오르막 +' + e.climbMin + '분' : ''); }
 function renderStrip(){
   const r = current()[state.sel], line = document.getElementById('line');
   document.getElementById('strip-title').textContent = r ? NAMES[state.sel] + '선 · ' + startName() + ' 순환' : '코스 없음';
   const bud = document.getElementById('budget'), shares = document.getElementById('shares');
   if (!r){ line.innerHTML = ''; bud.textContent = ''; shares.innerHTML = ''; return; }
-  const mins = fmtMin(r.dist/1000);
+  const e = eta(r), mins = e.min;
   if (state.budget){
     const d = state.budget - mins;
-    bud.innerHTML = '예상 ' + mins + '분 · 공강 ' + state.budget + '분 ' + (d >= 0 ? '<b>' + d + '분 남음</b>' : '<b class="over">' + (-d) + '분 넘음</b>');
-  } else bud.innerHTML = '예상 <b>' + mins + '분</b>';
+    bud.innerHTML = '예상 ' + mins + '분 · 공강 ' + state.budget + '분 ' + (d >= 0 ? '<b>' + d + '분 남음</b>' : '<b class="over">' + (-d) + '분 넘음</b>') + '<br>' + etaNote(e);
+  } else bud.innerHTML = '예상 <b>' + mins + '분</b> · ' + etaNote(e);
   // 구간 경사 띠
   const g = grades(r), n = g.length; let segs = '', st = 0;
   for (let i=1;i<=n;i++){
@@ -533,7 +602,7 @@ function renderCards(){
     b.innerHTML =
       '<span class="badge">' + NAMES[i] + '</span>' +
       '<span><b>' + NAMES[i] + '선 · ' + startName() + ' 순환</b>' +
-      '<small>' + fmtMin(r.dist/1000) + '분 · 상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small></span>' +
+      '<small>' + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · 상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small></span>' +
       '<span class="km">' + (r.dist/1000).toFixed(2) + '<em>km</em></span>';
     b.addEventListener('click', () => { state.sel = i; state.focus = -1; renderAll(false); });
     el.appendChild(b);
@@ -563,7 +632,7 @@ function renderBrief(){
   if (!r){ ul.innerHTML=''; return; }
   const g = grades(r), n = g.length, lines = [];
   const flatPct = Math.round(r.share[0]*100), hardPct = Math.round((r.share[2]+r.share[3])*100);
-  lines.push('총 ' + (r.dist/1000).toFixed(1) + 'km, 6분 30초 페이스로 약 ' + fmtMin(r.dist/1000) + '분. 출발한 곳으로 돌아오는 코스예요.');
+  lines.push('총 ' + (r.dist/1000).toFixed(1) + 'km, 6분 30초 페이스에 신호·오르막을 더해 약 ' + eta(r).min + '분. 출발한 곳으로 돌아오는 코스예요.');
   let best = null, st = -1;
   for (let i=0;i<=n;i++){
     const upHill = i<n && g[i] > 3;
@@ -582,7 +651,7 @@ function renderBrief(){
   const show = ls => { ul.innerHTML = ls.map(l => '<li>'+String(l).replace(/</g,'&lt;')+'</li>').join(''); note.textContent = 'ChatKHU가 위 코스 수치만 보고 쓴 브리핑이에요. 경로와 경사는 계산값입니다.'; };
   if (briefCache[key]) return show(briefCache[key]);
   note.textContent = 'ChatKHU가 브리핑을 쓰는 중이에요. 지금 문장은 규칙으로 만든 임시 문장입니다.';
-  ai('brief', {route:{start:startName(), dist_km:+(r.dist/1000).toFixed(2), minutes:fmtMin(r.dist/1000), ascent_m:r.asc, max_grade_pct:Math.round(r.maxg),
+  ai('brief', {route:{start:startName(), dist_km:+(r.dist/1000).toFixed(2), minutes:eta(r).min, signals:eta(r).sig, ascent_m:r.asc, max_grade_pct:Math.round(r.maxg),
       share_pct:{flat:flatPct, mild:Math.round(r.share[1]*100), up:Math.round(r.share[2]*100), steep:Math.round(r.share[3]*100)},
       longest_climb: best ? {at_km:+(best.s*STEP/1000).toFixed(1), length_m:Math.round(best.len/10)*10, rise_m:Math.round(best.rise)} : null,
       trail_pct:Math.round(r.trail*100), steps:r.steps, time_budget_min:state.budget}})
@@ -597,7 +666,8 @@ const briefCache = {};
 // data.js 좌표와 같은 투영(build.py): 37.2432N, 127.0818E 기준 미터 평면
 const LA0 = 37.2432, LO0 = 127.0818, KX = Math.cos(LA0*Math.PI/180)*111320, KY = 110540;
 const run = {mode:'idle', route:null, prog:0, pos:null, prev:null, heading:null, segs:[], dist:0,
-             activeMs:0, restMs:0, since:0, recent:[], watch:null, sim:null, simT:0, follow:true, lock:null, label:''};
+             activeMs:0, restMs:0, stopMs:0, stops:0, auto:false, lastMoveT:0, splits:[], since:0, recent:[], watch:null, sim:null, simT:0,
+             follow:true, lock:null, label:'', voice:true, lastTurn:null, lastOff:false, arrived:false};
 const now = () => run.sim ? run.simT : Date.now();
 const fmtClock = ms => { const s = Math.floor(ms/1000), h = Math.floor(s/3600), m = Math.floor(s/60)%60, ss = String(s%60).padStart(2,'0'); return h ? h+':'+String(m).padStart(2,'0')+':'+ss : m+':'+ss; };
 const fmtPace = secPerKm => isFinite(secPerKm) && secPerKm > 0 && secPerKm < 1800 ? Math.floor(secPerKm/60)+"'"+String(Math.round(secPerKm%60)).padStart(2,'0')+'"' : '--';
@@ -617,6 +687,9 @@ function onFix(x, y, acc, heading){
     const dt = last ? (t - last[2]) / 1000 : 0;
     if (!last || (d >= 3 && d/Math.max(dt, 0.5) < 9)){ // 3m 미만 흔들림·순간이동(9m/s 초과)은 버림
       if (last){ run.dist += d; if (heading == null) run.heading = bearing(x-last[0], y-last[1]); }
+      if (last && run.auto){ run.stopMs += t - run.since; run.since = t; run.auto = false; }
+      run.lastMoveT = t;
+      while (run.dist >= (run.splits.length+1)*1000) kmDone();
       seg.push([x, y, t]);
       run.recent.push([t, run.dist]);
       while (run.recent.length > 2 && t - run.recent[0][0] > 30000) run.recent.shift();
@@ -635,19 +708,19 @@ function guideText(){
   const n = run.route.pts.length/2, [x, y] = [run.pos.x, run.pos.y];
   const left = Math.max(0, (n-1-run.prog)*STEP);
   if (run.prog >= n-3 && Math.hypot(...[0,1].map(k => rp(n-1)[k] - [x,y][k])) < 40)
-    return {main:'도착했어요! 종료를 눌러 기록을 저장하세요', sub:'', target:null};
+    return {main:'도착했어요! 종료를 눌러 기록을 저장하세요', sub:'', target:null, arrived:true};
   if (run.off){
     const [tx, ty] = rp(run.prog);
     return {main:'코스에서 ' + Math.round(run.off) + 'm 벗어났어요', sub:'화살표 방향으로 돌아가세요 · 남은 거리 ' + (left/1000).toFixed(2) + 'km', target:[tx, ty], off:true};
   }
   // 앞으로 50~200m 안에서 40° 넘게 꺾이는 곳을 찾는다
   const [a0, a1] = [rp(run.prog), rp(run.prog+2)], b1 = bearing(a1[0]-a0[0], a1[1]-a0[1]);
-  let turn = '';
+  let turn = '', turnAt = null, turnDist = 0;
   for (let k = 2; k <= 8; k++){
     const [c0, c1] = [rp(run.prog+k), rp(run.prog+k+2)], diff = angDiff(b1, bearing(c1[0]-c0[0], c1[1]-c0[1]));
-    if (Math.abs(diff) > 40){ turn = '약 ' + k*STEP + 'm 앞에서 ' + (diff > 0 ? '오른쪽' : '왼쪽') + '으로 꺾어요'; break; }
+    if (Math.abs(diff) > 40){ turn = '약 ' + k*STEP + 'm 앞에서 ' + (diff > 0 ? '오른쪽' : '왼쪽') + '으로 꺾어요'; turnAt = Math.round((run.prog+k)/4); turnDist = k*STEP; break; }
   }
-  return {main: turn || '이 방향으로 계속 가세요', sub:'남은 거리 ' + (left/1000).toFixed(2) + 'km', target:rp(run.prog+3)};
+  return {main: turn || '이 방향으로 계속 가세요', sub:'남은 거리 ' + (left/1000).toFixed(2) + 'km', target:rp(run.prog+3), turnAt, turnDist};
 }
 
 function renderRun(){
@@ -662,17 +735,24 @@ function renderRun(){
     want.forEach(k => { const b = document.createElement('button'); b.type = 'button'; b.className = 'rbtn ' + B_[k][1]; b.textContent = B_[k][0]; b.onclick = () => ACT[k](); btns.appendChild(b); });
   }
   if (!on) return;
-  const t = now(), act = run.activeMs + (run.mode === 'running' ? t - run.since : 0), rest = run.restMs + (run.mode === 'paused' ? t - run.since : 0);
+  const t = now(), act = activeNow(), rest = run.restMs + (run.mode === 'paused' ? t - run.since : 0) + run.stopMs + (run.auto ? t - run.since : 0);
   document.getElementById('r-time').textContent = fmtClock(act);
   document.getElementById('r-dist').textContent = (run.dist/1000).toFixed(2);
   document.getElementById('r-rest').textContent = fmtClock(rest);
   const rc = run.recent, rd = rc.length > 1 ? rc[rc.length-1][1] - rc[0][1] : 0;
-  document.getElementById('r-pace').textContent = run.mode === 'running' && rd > 20 ? fmtPace((rc[rc.length-1][0] - rc[0][0]) / 1000 / (rd/1000)) : '--';
+  document.getElementById('r-rest-l').textContent = run.stops ? '휴식·정지 ' + run.stops + '회' : '휴식·정지';
+  document.getElementById('r-pace').textContent = run.mode === 'running' && !run.auto && rd > 20 ? fmtPace((rc[rc.length-1][0] - rc[0][0]) / 1000 / (rd/1000)) : '--';
   const g = document.getElementById('guide'), arrow = document.getElementById('garrow');
   if (!run.pos){ document.getElementById('gmain').textContent = '위치를 찾는 중'; document.getElementById('gsub').textContent = 'GPS가 잡히는 데 몇 초 걸려요'; return; }
   const gt = guideText();
   g.classList.toggle('off', !!gt.off);
-  document.getElementById('gmain').textContent = run.mode === 'paused' ? '휴식 중' : gt.main;
+  document.getElementById('gmain').textContent = run.mode === 'paused' ? '휴식 중' : run.auto ? '멈춤 감지 · 신호 대기 시간은 기록에서 빠져요' : gt.main;
+  if (run.mode === 'running' && !run.auto){
+    if (gt.turnAt != null && gt.turnDist <= 75 && run.lastTurn !== gt.turnAt){ run.lastTurn = gt.turnAt; speak(gt.main); }
+    if (gt.off && !run.lastOff) speak('코스에서 벗어났어요. 화살표 방향으로 돌아가세요.');
+    if (gt.arrived && !run.arrived){ run.arrived = true; speak('도착했어요. 종료를 눌러 기록을 저장하세요.'); }
+    run.lastOff = !!gt.off;
+  }
   let sub = gt.sub;
   if (gt.target){
     const tb = bearing(gt.target[0]-run.pos.x, gt.target[1]-run.pos.y);
@@ -705,6 +785,29 @@ function drawRun(){
 }
 
 function status(msg){ document.getElementById('runstatus').textContent = msg; }
+function activeNow(){ return run.activeMs + (run.mode === 'running' && !run.auto ? now() - run.since : 0); }
+function climbBetween(r, a, b){ let s = 0; for (let i = Math.max(0, a); i < Math.min(r.el.length-1, b); i++) s += Math.max(0, r.el[i+1]-r.el[i]); return Math.round(s); }
+function speak(text){
+  if (!run.voice || !window.speechSynthesis || !text) return;
+  const u = new SpeechSynthesisUtterance(text); u.lang = 'ko-KR'; u.rate = 1.05; speechSynthesis.speak(u);
+}
+// 매 km: 구간 기록 + ChatKHU 코치 한 마디(실패하면 숫자만 읽는다)
+function kmDone(){
+  const k = run.splits.length + 1, act = activeNow(), prev = run.splits.length ? run.splits[run.splits.length-1].act : 0;
+  run.splits.push({act, prog:run.prog});
+  const pace = fmtPace((act - prev)/1000), avg = fmtPace(act/1000/k), toRead = p => p.replace("'", '분 ').replace('"', '초');
+  const live = {km_done:k, last_km_pace:pace, avg_pace:avg, next_km_ascent_m:climbBetween(run.route, run.prog, run.prog + 1000/STEP),
+                km_left:+Math.max(0, (run.route.pts.length/2 - 1 - run.prog)*STEP/1000).toFixed(1)};
+  ai('coach', {live}).then(line => {
+    const say = typeof line === 'string' && line ? line : k + '킬로미터. 이번 구간 ' + toRead(pace) + '예요.';
+    speak(say); status('코치: ' + say);
+  });
+}
+// 8초 넘게 제자리면 자동 정지(신호 대기 등), 다시 움직이면 onFix에서 재개
+function autoCheck(){
+  if (run.mode !== 'running' || run.auto || !run.lastMoveT || now() - run.lastMoveT < 8000) return;
+  run.activeMs += Math.max(0, run.lastMoveT - run.since); run.since = run.lastMoveT; run.auto = true; run.stops++;
+}
 async function keepAwake(){ try { run.lock = await navigator.wakeLock.request('screen'); } catch(e){} }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && run.mode !== 'idle') keepAwake(); });
 
@@ -744,20 +847,24 @@ const ACT = {
   start(sim){
     const r = current()[state.sel];
     if (!r){ status('먼저 코스를 골라 주세요.'); return; }
-    Object.assign(run, {route:r, prog:0, pos:null, heading:null, segs:[[]], dist:0, activeMs:0, restMs:0, recent:[], follow:true, off:0,
+    Object.assign(run, {route:r, prog:0, pos:null, heading:null, segs:[[]], dist:0, activeMs:0, restMs:0, stopMs:0, stops:0, auto:false, lastMoveT:0,
+                        splits:[], recent:[], follow:true, off:0, lastTurn:null, lastOff:false, arrived:false,
                         label:NAMES[state.sel] + '선 · ' + startName() + ' ' + (r.dist/1000).toFixed(1) + 'km'});
     run.mode = 'running';
     if (!startTracking(sim === true)){ run.mode = 'idle'; renderRun(); return; }
     run.since = now(); keepAwake(); renderRun();
+    document.getElementById('report').hidden = true;
+    speak('출발합니다. ' + (r.dist/1000).toFixed(1) + '킬로미터 순환 코스예요.'); // 시작 버튼 탭이 있어야 휴대폰에서 음성이 나온다
   },
-  rest(){ const t = now(); run.activeMs += t - run.since; run.since = t; run.mode = 'paused'; renderRun(); },
-  resume(){ const t = now(); run.restMs += t - run.since; run.since = t; run.mode = 'running'; run.segs.push([]); renderRun(); },
+  rest(){ const t = now(); if (run.auto){ run.stopMs += t - run.since; run.auto = false; } else run.activeMs += t - run.since; run.since = t; run.mode = 'paused'; renderRun(); },
+  resume(){ const t = now(); run.restMs += t - run.since; run.since = t; run.lastMoveT = t; run.mode = 'running'; run.segs.push([]); renderRun(); },
   end(){
     const t = now();
-    if (run.mode === 'running') run.activeMs += t - run.since; else run.restMs += t - run.since;
+    if (run.mode === 'running'){ if (run.auto) run.stopMs += t - run.since; else run.activeMs += t - run.since; } else run.restMs += t - run.since;
+    run.auto = false;
     stopTracking();
     const rec = {at:new Date().toLocaleString('ko-KR', {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'}), label:run.label,
-                 km:run.dist/1000, ms:run.activeMs, rest:run.restMs, sim:!!run.sim};
+                 km:run.dist/1000, ms:run.activeMs, rest:run.restMs + run.stopMs, stops:run.stops, sim:!!run.sim};
     let log = [];
     try { log = JSON.parse(localStorage.getItem('hanbakwi.runs') || '[]'); } catch(e){}
     log.unshift(rec); log = log.slice(0, 20);
@@ -765,17 +872,51 @@ const ACT = {
     run.mode = 'idle'; run.sim = null;
     status(rec.km > 0.05 ? '기록을 저장했어요: ' + rec.km.toFixed(2) + 'km, ' + fmtClock(rec.ms) + ', 평균 ' + fmtPace(rec.ms/1000/rec.km) + '/km' : '이동 거리가 거의 없어서 페이스는 계산하지 않았어요.');
     renderRun(); renderLog(); draw();
+    if (rec.km >= 0.3) askFeel(rec);
   }
 };
+/* ---------- 달린 뒤: 느낌 한 번 → ChatKHU 리포트 + 다음 코스 ---------- */
+function askFeel(rec){
+  const box = document.getElementById('report'), r = run.route;
+  // km별 페이스와 그 구간 상승량(코스 고도 기준)
+  const marks = [{act:0, prog:0}, ...run.splits, {act:rec.ms, prog:run.prog}];
+  const splits = [];
+  for (let i = 1; i < marks.length; i++){
+    const km = i < marks.length-1 ? 1 : (rec.km - run.splits.length);
+    if (km < 0.2) continue;
+    splits.push({km:i, pace:fmtPace((marks[i].act - marks[i-1].act)/1000/km), ascent_m:climbBetween(r, marks[i-1].prog, marks[i].prog)});
+  }
+  const payload = {course:rec.label, planned_km:+(r.dist/1000).toFixed(2), km:+rec.km.toFixed(2), active:fmtClock(rec.ms),
+                   avg_pace:fmtPace(rec.ms/1000/rec.km), stops:rec.stops, stop_and_rest:fmtClock(rec.rest), splits};
+  box.hidden = false;
+  box.innerHTML = '<h3><span class="ai">AI</span>오늘 달리기 어땠어요?</h3><div class="feel">' +
+    ['힘들었어요','딱 좋았어요','쉬웠어요'].map(f => '<button type="button">' + f + '</button>').join('') + '</div>';
+  box.querySelectorAll('.feel button').forEach(b => b.onclick = async () => {
+    box.innerHTML = '<h3><span class="ai">AI</span>러닝 리포트</h3><p class="fine">ChatKHU가 구간 기록을 분석하는 중이에요…</p>';
+    const rep = await ai('report', {run:{...payload, feel:b.textContent}});
+    if (!rep || !rep.summary){ box.innerHTML = '<h3>러닝 리포트</h3><p class="fine">ChatKHU에 연결하지 못했어요. 기록은 아래 목록에 저장돼 있어요.</p>'; return; }
+    const esc = v => String(v).replace(/</g, '&lt;'), nx = rep.next || {};
+    const ok = DIST_OPTS.some(d => d[0] === nx.dist) && TERR_OPTS.some(o => o[0] === nx.terrain);
+    box.innerHTML = '<h3><span class="ai">AI</span>러닝 리포트</h3><p>' + esc(rep.summary) + '</p><ul class="brief">' +
+      (rep.points || []).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' +
+      (ok ? '<p class="fine">다음 추천: ' + nx.dist + 'km · ' + TERR_OPTS.find(o => o[0] === nx.terrain)[1] + ' — ' + esc(nx.why || '') + '</p><button type="button" class="linkbtn" id="nextgo">추천 코스 보기</button>' : '');
+    if (ok) document.getElementById('nextgo').onclick = () => { state.dist = nx.dist; state.terr = nx.terrain; state.sel = 0; state.focus = -1; renderAll(true); };
+  });
+}
 function renderLog(){
   let log = [];
   try { log = JSON.parse(localStorage.getItem('hanbakwi.runs') || '[]'); } catch(e){}
   document.getElementById('runlog').innerHTML = log.slice(0, 5).map(r =>
-    '<li>' + r.at + ' · ' + r.label + (r.sim ? ' (시뮬레이션)' : '') + ' — <b>' + r.km.toFixed(2) + 'km</b> · <b>' + fmtClock(r.ms) + '</b> · 휴식 ' + fmtClock(r.rest) +
+    '<li>' + r.at + ' · ' + r.label + (r.sim ? ' (시뮬레이션)' : '') + ' — <b>' + r.km.toFixed(2) + 'km</b> · <b>' + fmtClock(r.ms) + '</b> · 휴식·정지 ' + fmtClock(r.rest) + (r.stops ? '(' + r.stops + '회)' : '') +
     (r.km > 0.05 ? ' · 평균 <b>' + fmtPace(r.ms/1000/r.km) + '</b>' : '') + '</li>').join('');
 }
 document.getElementById('simbtn').onclick = () => ACT.start(true);
-setInterval(() => { if (run.mode !== 'idle') renderRun(); }, 1000);
+document.getElementById('voicebtn').onclick = e => {
+  run.voice = !run.voice; e.target.setAttribute('aria-pressed', String(run.voice));
+  e.target.textContent = run.voice ? '음성 안내 켜짐' : '음성 안내 꺼짐';
+  if (!run.voice && window.speechSynthesis) speechSynthesis.cancel();
+};
+setInterval(() => { if (run.mode !== 'idle'){ autoCheck(); renderRun(); } }, 1000);
 
 function renderAll(refit){
   seg('seg-start', START_OPTS, 'start'); seg('seg-dist', DIST_OPTS, 'dist'); seg('seg-terr', TERR_OPTS, 'terr');

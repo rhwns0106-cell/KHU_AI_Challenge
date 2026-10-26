@@ -25,5 +25,18 @@ const call = (body, method = 'POST') => new Promise(done => {
   console.log('brief', b.code, b.body.result);
   assert.equal(b.code, 200);
   assert.ok(Array.isArray(b.body.result) && b.body.result.length >= 2);
+  const c = await call({task: 'coach', payload: {live: {km_done: 2, last_km_pace: '6:52', avg_pace: '6:40', next_km_ascent_m: 18, km_left: 3.1}}});
+  console.log('coach', c.code, c.body.result);
+  assert.equal(c.code, 200); assert.ok(typeof c.body.result === 'string' && c.body.result.length > 5);
+
+  const r = await call({task: 'report', payload: {run: {course: 'A선 5.1km', km: 5.1, active: '35:20', stops: 3, stop_time: '1:40', feel: '힘들었어요',
+    splits: [{km: 1, pace: '6:30', ascent_m: 4}, {km: 2, pace: '7:20', ascent_m: 22}, {km: 3, pace: '6:35', ascent_m: 3}]}}});
+  console.log('report', r.code, JSON.stringify(r.body.result));
+  assert.equal(r.code, 200); assert.ok(r.body.result.summary && [3, 5, 7, 10].includes(r.body.result.next.dist));
+
+  const opts = {'5|flat|0': {km: 5.35, min: 36, ascent: 67, last_km_ascent: 21}, '5|flat|1': {km: 4.85, min: 33, ascent: 64, last_km_ascent: 3}, '3|flat|0': {km: 2.9, min: 20, ascent: 31, last_km_ascent: 5}};
+  const f = await call({task: 'refine', payload: {request: '마지막 오르막 빼줘', now: '5|flat|0', options: opts}});
+  console.log('refine', f.code, f.body.result);
+  assert.equal(f.code, 200); assert.ok(f.body.result.pick in opts);
   console.log('OK');
 })().catch(e => { console.error(e); process.exit(1); });

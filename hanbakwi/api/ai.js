@@ -17,12 +17,37 @@ const TASKS = {
   brief: {
     max: 1500,
     system: '너는 러닝 코치다. 주어진 코스 수치만 근거로 출발 전 브리핑을 한국어 문장 3~4개로 써라. ' +
-      '수치에 없는 시설·경치·안전 정보는 지어내지 마라. 각 문장은 60자 이내, 존댓말(~요). ' +
+      '수치에 없는 시설·경치·안전 정보는 지어내지 마라. 각 문장은 60자 이내, 끝은 "~예요/~해요/~세요"로 한 번만 맺는다("입니다요", "요요" 금지). ' +
       '경사 기준은 앱과 같게 쓴다: 0–2% 평지, 2–5% 완만, 5–8% 오르막, 8% 이상 급경사. 8% 이상을 쉽다거나 무리 없다고 말하지 마라. ' +
       'time_budget_min이 있으면 예상 시간과 비교해 남거나 넘는 시간을 한 문장에 말해라. ' +
       '설명·코드블록 없이 JSON 문자열 배열 하나로만 출력: ["문장1","문장2",...]',
     user: p => JSON.stringify(p.route || {}),
     tokens: 400
+  },
+  coach: {
+    max: 800,
+    system: '너는 달리는 사람 귀에 대고 말하는 러닝 코치다. 주어진 실시간 수치로 음성으로 읽을 한국어 한두 문장(합쳐 45자 이내)을 써라. ' +
+      '페이스는 "6분 40초"처럼 읽기 좋게. 다음 1km가 오르막(상승 10m 이상)이면 미리 알려라. 수치에 없는 내용은 지어내지 마라. ' +
+      '설명·따옴표 없이 문장만 출력.',
+    user: p => JSON.stringify(p.live || {}),
+    tokens: 120
+  },
+  report: {
+    max: 3000,
+    system: '너는 러닝 코치다. 방금 끝난 달리기 기록(km별 페이스와 그 구간 상승량, 신호·정지 횟수, 본인 느낌)을 분석해 JSON 하나로만 답해라. ' +
+      '{"summary": "한두 문장 총평", "points": ["관찰 2~3개, 각 60자 이내, 반드시 수치 근거"], "next": {"dist": 3|5|7|10, "terrain": "flat"|"mild"|"hill"|"trail", "why": "다음 추천 이유 한 문장"}} ' +
+      '목표 페이스는 주어지지 않으니 만들어 말하지 마라. 오르막 구간에서 느려진 것은 정상이라고 구분해서 말하라. 느낌이 힘들었으면 다음 추천을 쉽게, 쉬웠으면 어렵게. 기록에 없는 내용은 지어내지 마라. 존댓말(~요).',
+    user: p => JSON.stringify(p.run || {}),
+    tokens: 500
+  },
+  refine: {
+    max: 4000,
+    system: '너는 러닝 코스 추천 앱의 코스 수정 도우미다. 사용자의 요청과 지금 보고 있는 코스, 그리고 고를 수 있는 후보 목록(id별 수치)을 받는다. ' +
+      '요청에 가장 맞는 후보 하나를 골라 JSON 하나로만 답해라: {"pick": "후보 id", "reason": "왜 골랐는지 수치를 들어 한 문장, 존댓말"}. ' +
+      '후보 목록에 없는 id는 절대 쓰지 마라. 맞는 후보가 없으면 가장 가까운 것을 고르고 reason에 한계를 밝혀라. ' +
+      'reason에는 필드 이름(last_km_ascent 등)을 쓰지 말고 "마지막 1km 오르막 20m"처럼 우리말로, 끝은 "~예요/~했어요".',
+    user: p => JSON.stringify({request: String(p.request || '').slice(0, 200), now: p.now, options: p.options}),
+    tokens: 200
   }
 };
 
@@ -48,7 +73,8 @@ module.exports = async (req, res) => {
     });
     if (!r.ok) return res.status(502).json({error: 'AI 응답 실패 (' + r.status + ')'});
     const data = await r.json();
-    return res.status(200).json({result: json(data.choices[0].message.content), model: MODEL});
+    const text = data.choices[0].message.content;
+    return res.status(200).json({result: task === 'coach' ? String(text).trim().slice(0, 120) : json(text), model: MODEL});
   } catch (e) {
     return res.status(502).json({error: 'AI 응답을 읽지 못했어요'});
   }
