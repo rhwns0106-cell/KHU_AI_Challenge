@@ -251,6 +251,7 @@ canvas.drag{cursor:grabbing}
       <div class="run-btns" id="runbtns"></div>
       <p class="runstatus" id="runstatus">시작을 누르면 GPS로 내 위치를 따라가며 다음에 갈 방향을 알려줘요. 화면을 켜 둔 채로 달려 주세요.</p>
       <button class="linkbtn" id="simbtn" type="button">GPS 없이 시뮬레이션으로 시험하기</button>
+      <button class="linkbtn" id="awaybtn" type="button" hidden>시뮬레이션: 일부러 길 벗어나기</button>
       <button class="linkbtn" id="voicebtn" type="button" aria-pressed="true">음성 안내 켜짐</button>
       <div class="report" id="report" hidden aria-live="polite"></div>
       <ul class="runlog" id="runlog"></ul>
@@ -993,6 +994,7 @@ function renderRun(){
   document.getElementById('rstats').hidden = !on;
   document.getElementById('guide').hidden = !on;
   document.getElementById('simbtn').hidden = on;
+  document.getElementById('awaybtn').hidden = !(run.sim && run.mode === 'running' && !run.simAway);
   const B_ = {start:['시작','primary'], rest:['휴식',''], resume:['다시 달리기','primary'], end:['종료','end']};
   const want = run.mode === 'idle' ? ['start'] : run.mode === 'running' ? ['rest','end'] : ['resume','end'];
   if (btns.dataset.k !== want.join()){
@@ -1053,7 +1055,7 @@ function status(msg){ document.getElementById('runstatus').textContent = msg; }
 function reroute(){
   const nr = OrcaLoop.rejoin(graph(), run.route, run.prog, run.pos.x, run.pos.y);
   if (!nr) return;
-  Object.assign(run, {route:nr, prog:0, off:0, offSince:0, rerouteAt:now(), reroutes:run.reroutes + 1, lastTurn:null});
+  Object.assign(run, {route:nr, prog:0, off:0, offSince:0, rerouteAt:now(), reroutes:run.reroutes + 1, lastTurn:null, simI:0});
   speak('코스를 다시 잡았어요. 화살표 방향으로 가세요.');
   status('코스를 벗어나서, 지금 위치에서 원래 코스로 돌아가는 길을 다시 찾았어요. 남은 거리 ' + (nr.dist/1000).toFixed(2) + 'km');
   draw();
@@ -1088,11 +1090,17 @@ function startTracking(sim){
   run.sim = sim;
   if (sim){
     // 시뮬레이션: 코스를 따라 6분 25초 페이스로, 화면 1초에 10초씩 빠르게 진행
-    run.simT = Date.now(); let i = 0;
+    run.simT = Date.now(); run.simI = 0; run.simAway = null;
     run.watch = setInterval(() => {
       run.simT += 10000;
-      if (run.mode === 'running') i = Math.min(run.route.pts.length/2-1, i + 26/STEP); // 시뮬레이션 10초에 26m = 6'25"/km
-      const k = Math.floor(i), [x, y] = rp(k), [nx, ny] = rp(k+1), f = i - k;
+      // '일부러 길 벗어나기': 코스와 직각 방향으로 26m씩 4번(약 100m) 걸어 나간다 → 재탐색되면 새 코스를 처음부터 따라간다
+      if (run.simAway && run.mode === 'running'){
+        const a = run.simAway; a.n++; a.x += a.dx*26; a.y += a.dy*26;
+        if (a.n >= 4 || run.route !== a.route){ run.simAway = null; if (run.route !== a.route) run.simI = 0; }
+        return onFix(a.x, a.y, 6, null);
+      }
+      if (run.mode === 'running') run.simI = Math.min(run.route.pts.length/2-1, run.simI + 26/STEP); // 시뮬레이션 10초에 26m = 6'25"/km
+      const i = run.simI, k = Math.floor(i), [x, y] = rp(k), [nx, ny] = rp(k+1), f = i - k;
       onFix(x + (nx-x)*f + (Math.random()-.5)*4, y + (ny-y)*f + (Math.random()-.5)*4, 6, null);
     }, 1000);
     status('시뮬레이션 중이에요. 실제 위치가 아니라 코스를 따라 10배 빠르게 움직입니다.');
@@ -1119,7 +1127,7 @@ function stopTracking(){
 const ACT = {
   start(sim){
     const r = current()[state.sel];
-    if (!r){ status('먼저 코스를 골라 주세요.'); return; }
+    if (!r){ status(gen ? '코스를 만드는 중이에요. 잠깐 뒤에 다시 눌러 주세요.' : '먼저 코스를 골라 주세요.'); return; }
     Object.assign(run, {route:r, prog:0, pos:null, heading:null, segs:[[]], dist:0, activeMs:0, restMs:0, stopMs:0, stops:0, auto:false, lastMoveT:0,
                         splits:[], recent:[], follow:true, off:0, lastTurn:null, lastOff:false, arrived:false, climbed:0, offSince:0, rerouteAt:0, reroutes:0,
                         label:NAMES[state.sel] + '선 · ' + courseName() + ' ' + (r.dist/1000).toFixed(1) + 'km' + (state.rev ? ' 반대' : ''),
@@ -1188,6 +1196,11 @@ function renderLog(){
     (r.km > 0.05 ? ' · 평균 <b>' + fmtPace(r.ms/1000/r.km) + '</b>' : '') + '</li>').join('');
 }
 document.getElementById('simbtn').onclick = () => ACT.start(true);
+document.getElementById('awaybtn').onclick = () => {
+  const k = Math.floor(run.simI), [x, y] = rp(k), [nx, ny] = rp(k+2), L = Math.hypot(nx-x, ny-y) || 1;
+  run.simAway = {x, y, dx:-(ny-y)/L, dy:(nx-x)/L, n:0, route:run.route}; // 진행 방향의 왼쪽 직각
+  renderRun();
+};
 document.getElementById('voicebtn').onclick = e => {
   run.voice = !run.voice; e.target.setAttribute('aria-pressed', String(run.voice));
   e.target.textContent = run.voice ? '음성 안내 켜짐' : '음성 안내 꺼짐';
