@@ -13,7 +13,7 @@
   --ground:#0B1230; --panel:#111A3D; --raise:#18244F; --rule:#2A3766; --rule-soft:#1D2950;
   --porcelain:#F4F1E8; --muted:#AEB5CC; --faint:#7E88A8;
   --cobalt:#1E5BFF; --cobalt-ink:#8FB0FF;
-  --flat:#22B14C; --mild:#FFC20E; --up:#FF7A1A; --steep:#E8323F;
+  --flat:#22B14C; --mild:#FFC20E; --up:#FF7A1A; --steep:#E8323F; --down:#3EC6E0;
   --map-road:#1B2652; --map-major:#25336A; --map-path:#2C3A70; --map-park:#10233A; --map-wood:#0F2834; --map-water:#123158; --map-bld:#151F47;
   --kr:"Gothic A1","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
   --num:"Barlow Condensed","Gothic A1",system-ui,sans-serif;
@@ -154,6 +154,7 @@ canvas.drag{cursor:grabbing}
 .feel button:hover{border-color:var(--cobalt-ink)}
 .refine{display:flex;flex-direction:column;gap:8px;margin-top:12px}
 .refine-msg{margin:0;font-size:14px;color:var(--muted);min-height:20px}
+#startmsg:empty{display:none}
 .mic{display:grid;place-items:center;width:44px;border:0;background:transparent;cursor:pointer;color:var(--muted)}
 .mic[aria-pressed="true"]{color:var(--steep)}
 
@@ -180,6 +181,7 @@ canvas.drag{cursor:grabbing}
       <span><i style="background:var(--mild)"></i>완만<small> 2–5%</small></span>
       <span><i style="background:var(--up)"></i>오르막<small> 5–8%</small></span>
       <span><i style="background:var(--steep)"></i>급경사<small> 8%+</small></span>
+      <span><i style="background:var(--down)"></i>내리막<small> −2%↓</small></span>
     </div>
     <div class="attr">© OpenStreetMap · SRTM</div>
   </div>
@@ -210,7 +212,8 @@ canvas.drag{cursor:grabbing}
     <div class="mapslot" id="mapslot"></div>
 
     <section class="strip" aria-labelledby="strip-title">
-      <div class="strip-head"><h2 id="strip-title">A선</h2><p class="budget" id="budget"></p></div>
+      <div class="strip-head"><h2 id="strip-title">A선</h2><p class="budget" id="budget"></p>
+        <button class="linkbtn" id="revbtn" type="button" aria-pressed="false">반대 방향으로 돌기</button></div>
       <div class="line" id="line"></div>
       <div class="shares" id="shares"></div>
     </section>
@@ -276,7 +279,7 @@ const PACE = 6.5; // 분/km, 예상 시간 계산용
 const STEP = 25;  // 고도 표본 간격(m)
 const NAMES = ['A','B','C'];
 
-const state = {start:'gate', dist:5, terr:'flat', sel:0, budget:null, focus:-1};
+const state = {start:'gate', dist:5, terr:'flat', sel:0, budget:null, focus:-1, rev:false};
 
 /* 모바일에서는 지도를 패널 안 입력 아래로, 데스크톱에서는 오른쪽 전체로 */
 const box = document.getElementById('mapbox'), slot = document.getElementById('mapslot'), app = document.querySelector('.app');
@@ -410,6 +413,12 @@ function useMyLocation(){
 // 장소 이름 → 좌표: OpenStreetMap 검색(Nominatim), 지원 지역 안에서만 찾는다
 async function findPlace(name){
   startMsg('"' + name + '"을(를) 지도에서 찾는 중이에요…');
+  // 1순위 카카오(가게까지 촘촘함). 키가 없거나 못 찾으면 OpenStreetMap 검색으로
+  try {
+    const r = await fetch('/api/place?q=' + encodeURIComponent(name));
+    const hit = r.ok && (await r.json()).places[0];
+    if (hit){ setCustom(hit.name, (hit.lon - LO0)*KX, (hit.lat - LA0)*KY); if (state.start === 'custom') startMsg('카카오맵에서 찾은 곳: ' + hit.name + ' (' + hit.address + ')'); return; }
+  } catch(e){}
   // 세부 이름(출구 번호 등)으로 못 찾으면 떼고 한 번 더
   for (const q of [...new Set([name, name.replace(/\s*\d+\s*번\s*(출구|게이트|문)/, '').trim()])]){
     try {
@@ -445,6 +454,12 @@ function applyParsed(p, source, extra = []){
   renderAll(true);
 }
 document.getElementById('askform').addEventListener('submit', e => { e.preventDefault(); applyAsk(); });
+document.getElementById('revbtn').onclick = e => {
+  state.rev = !state.rev; state.focus = -1;
+  e.target.setAttribute('aria-pressed', String(state.rev));
+  e.target.textContent = state.rev ? '원래 방향으로 돌기' : '반대 방향으로 돌기';
+  renderAll(false);
+};
 
 /* 말로 주문: 브라우저 음성 인식(크롬·사파리). 지원 안 하면 버튼을 숨긴 채 둔다 */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition, mic = document.getElementById('mic');
@@ -465,7 +480,7 @@ document.getElementById('refineform').addEventListener('submit', async e => {
   const request = document.getElementById('rq').value.trim(), msg = document.getElementById('refinemsg');
   if (!request) return;
   const options = {};
-  DIST_OPTS.forEach(([d]) => TERR_OPTS.forEach(([t]) => (R[state.start+'|'+d+'|'+t] || []).forEach((r, i) => {
+  DIST_OPTS.forEach(([d]) => TERR_OPTS.forEach(([t]) => (R[state.start+'|'+d+'|'+t] || []).map(r => directed(r, state.rev)).forEach((r, i) => {
     const n = r.el.length;
     options[d+'|'+t+'|'+i] = {km:+(r.dist/1000).toFixed(2), min:eta(r).min, signals:eta(r).sig, ascent_m:r.asc, max_grade:Math.round(r.maxg),
       flat_pct:Math.round(r.share[0]*100), first_km_ascent:climbBetween(r, 0, 40), last_km_ascent:climbBetween(r, n-41, n-1), trail_pct:Math.round(r.trail*100)};
@@ -481,9 +496,9 @@ document.getElementById('refineform').addEventListener('submit', async e => {
 
 /* ---------- 경사 ---------- */
 function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
-function gradeClass(g){ const a = Math.abs(g); return a < 2 ? 0 : a < 5 ? 1 : a < 8 ? 2 : 3; }
-const GRADE_VARS = ['--flat','--mild','--up','--steep'];
-const GRADE_NAMES = ['평지','완만','오르막','급경사'];
+function gradeClass(g){ return g <= -2 ? 4 : g < 2 ? 0 : g < 5 ? 1 : g < 8 ? 2 : 3; }
+const GRADE_VARS = ['--flat','--mild','--up','--steep','--down'];
+const GRADE_NAMES = ['평지','완만','오르막','급경사','내리막'];
 function gradeColor(g){ return css(GRADE_VARS[gradeClass(g)]); }
 function grades(r){
   const el = r.el, n = el.length, g = new Array(n).fill(0);
@@ -491,7 +506,19 @@ function grades(r){
   for (let i=0;i<n;i++){ const a=Math.max(0,i-2), b=Math.min(n-1,i+2); g[i] = (el[b]-el[a]) / ((b-a)*STEP) * 100; }
   return g;
 }
-function current(){ return R[state.start + '|' + state.dist + '|' + state.terr] || []; }
+// 뛰는 방향 기준으로 다시 계산: 같은 길도 거꾸로 돌면 오르막·내리막·누적 상승·예상 시간이 바뀐다
+const dirCache = new WeakMap();
+function directed(r, rev){
+  let c = dirCache.get(r); if (!c) dirCache.set(r, c = {});
+  if (c[rev]) return c[rev];
+  const n = r.el.length, pts = [], el = rev ? r.el.slice().reverse() : r.el;
+  if (rev) for (let i = n-1; i >= 0; i--) pts.push(r.pts[2*i], r.pts[2*i+1]);
+  const o = Object.assign({}, r, {pts: rev ? pts : r.pts, el, rev:!!rev});
+  const g = grades(o), cnt = [0,0,0,0,0]; g.forEach(v => cnt[gradeClass(v)]++);
+  let asc = 0; for (let i = 1; i < n; i++) asc += Math.max(0, el[i] - el[i-1]);
+  return c[rev] = Object.assign(o, {share:cnt.map(k => k/n), asc:Math.round(asc), maxg:Math.max(0, ...g)});
+}
+function current(){ return (R[state.start + '|' + state.dist + '|' + state.terr] || []).map(r => directed(r, state.rev)); }
 function startName(){ return START_OPTS.find(s=>s[0]===state.start)[1]; }
 
 /* ---------- 지도 ---------- */
@@ -668,7 +695,7 @@ function eta(r){
 function etaNote(e){ return (e.sig ? '신호 ' + e.sig + '곳(대기 약 ' + Math.max(1, e.waitMin) + '분)' : '신호 없음') + (e.climbMin ? ' · 오르막 +' + e.climbMin + '분' : ''); }
 function renderStrip(){
   const r = current()[state.sel], line = document.getElementById('line');
-  document.getElementById('strip-title').textContent = r ? NAMES[state.sel] + '선 · ' + startName() + ' 순환' : '코스 없음';
+  document.getElementById('strip-title').textContent = r ? NAMES[state.sel] + '선 · ' + startName() + ' 순환' + (state.rev ? ' (반대 방향)' : '') : '코스 없음';
   const bud = document.getElementById('budget'), shares = document.getElementById('shares');
   if (!r){ line.innerHTML = ''; bud.textContent = ''; shares.innerHTML = ''; return; }
   const e = eta(r), mins = e.min;
@@ -760,7 +787,7 @@ function renderBrief(){
   if (briefCache[key]) return show(briefCache[key]);
   note.textContent = 'ChatKHU가 브리핑을 쓰는 중이에요. 지금 문장은 규칙으로 만든 임시 문장입니다.';
   ai('brief', {route:{start:startName(), dist_km:+(r.dist/1000).toFixed(2), minutes:eta(r).min, signals:eta(r).sig, ascent_m:r.asc, max_grade_pct:Math.round(r.maxg),
-      share_pct:{flat:flatPct, mild:Math.round(r.share[1]*100), up:Math.round(r.share[2]*100), steep:Math.round(r.share[3]*100)},
+      share_pct:{flat:flatPct, mild:Math.round(r.share[1]*100), up:Math.round(r.share[2]*100), steep:Math.round(r.share[3]*100), down:Math.round(r.share[4]*100)}, direction:state.rev ? '반대 방향' : '기본 방향',
       longest_climb: best ? {at_km:+(best.s*STEP/1000).toFixed(1), length_m:Math.round(best.len/10)*10, rise_m:Math.round(best.rise)} : null,
       trail_pct:Math.round(r.trail*100), steps:r.steps, time_budget_min:state.budget}})
     .then(ls => {
@@ -957,7 +984,7 @@ const ACT = {
     if (!r){ status('먼저 코스를 골라 주세요.'); return; }
     Object.assign(run, {route:r, prog:0, pos:null, heading:null, segs:[[]], dist:0, activeMs:0, restMs:0, stopMs:0, stops:0, auto:false, lastMoveT:0,
                         splits:[], recent:[], follow:true, off:0, lastTurn:null, lastOff:false, arrived:false,
-                        label:NAMES[state.sel] + '선 · ' + startName() + ' ' + (r.dist/1000).toFixed(1) + 'km',
+                        label:NAMES[state.sel] + '선 · ' + startName() + ' ' + (r.dist/1000).toFixed(1) + 'km' + (state.rev ? ' 반대' : ''),
                         meta:{start:state.start, startName:startName(), sx:B.starts.find(x => x.id === state.start).x, sy:B.starts.find(x => x.id === state.start).y,
                               dist:state.dist, terr:state.terr, cells:cells(r)}});
     run.mode = 'running';
