@@ -2,7 +2,7 @@
 # 실행: python tools/signals.py
 import json, math, urllib.request, urllib.parse, os
 
-BBOX = '37.2222,127.0558,37.2642,127.1078'
+BBOX = '37.1982,127.0253,37.2882,127.1383'
 Q = f'[out:json][timeout:60];(node[highway=traffic_signals]({BBOX});node[crossing=traffic_signals]({BBOX}););out;'
 req = urllib.request.Request('https://overpass-api.de/api/interpreter', data=urllib.parse.urlencode({'data': Q}).encode(),
                              headers={'User-Agent': 'KHU-orca-running/0.1 (student project)'})

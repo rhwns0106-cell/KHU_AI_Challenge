@@ -38,7 +38,7 @@ const {prep, near, makeLoops} = globalThis.OrcaLoop;
     const o = await globalThis.OrcaLoop.makeRoutes(P, a, b, D);
     console.log('목적지', D, o.flat.map(r => r.dist));
     assert.ok(o.flat.length >= 1, '목적지 코스가 있어야 함');
-    for (const t in o) for (const r of o[t]){
+    for (const t of ['flat', 'mild', 'hill', 'trail']) for (const r of o[t]){
       const m = r.pts.length / 2;
       assert.deepEqual([r.pts[0], r.pts[1]], [P.G.nodes[2*a], P.G.nodes[2*a+1]], '출발지에서 시작');
       assert.deepEqual([r.pts[2*m-2], r.pts[2*m-1]], [P.G.nodes[2*b], P.G.nodes[2*b+1]], '목적지에서 끝');

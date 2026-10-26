@@ -2,7 +2,7 @@
 # 좌표는 data.js와 같은 미터 평면(37.2432N, 127.0818E 기준). 실행: python tools/graph.py  (약 1분)
 import json, math, os, time, urllib.request, urllib.parse
 
-S, W, N, E = 37.2222, 127.0558, 37.2642, 127.1078
+S, W, N, E = 37.1982, 127.0253, 37.2882, 127.1383  # 국제캠 반경 약 5km(카카오 검색 반경과 같게)
 LA0, LO0 = 37.2432, 127.0818
 C = math.cos(math.radians(LA0))
 UA = {'User-Agent': 'KHU-orca-running/0.1 (student project)'}

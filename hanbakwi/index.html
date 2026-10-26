@@ -156,6 +156,8 @@ canvas.drag{cursor:grabbing}
 .feel button:hover{border-color:var(--cobalt-ink)}
 .refine{display:flex;flex-direction:column;gap:8px;margin-top:12px}
 .refine-msg{margin:0;font-size:14px;color:var(--muted);min-height:20px}
+.distnote{margin:4px 0 0;padding:8px 10px;border-left:3px solid var(--mild);background:var(--panel);font-size:14px;font-weight:600;border-radius:0 6px 6px 0}
+.distnote:empty{display:none}
 #startmsg:empty{display:none}
 .mic{display:grid;place-items:center;width:44px;border:0;background:transparent;cursor:pointer;color:var(--muted)}
 .mic[aria-pressed="true"]{color:var(--steep)}
@@ -217,6 +219,7 @@ canvas.drag{cursor:grabbing}
 
     <section class="strip" aria-labelledby="strip-title">
       <div class="strip-head"><h2 id="strip-title">A선</h2><p class="budget" id="budget"></p>
+        <p class="distnote" id="distnote" role="status"></p>
         <button class="linkbtn" id="revbtn" type="button" aria-pressed="false">반대 방향으로 돌기</button></div>
       <div class="line" id="line"></div>
       <div class="shares" id="shares"></div>
@@ -398,7 +401,7 @@ let locTok = 0; // 늦게 도착한 위치 응답이 그사이 고른 출발지�
 function setCustom(name, x, y){
   locTok++;
   const [node, d] = OrcaLoop.near(graph(), x, y);
-  if (d > 300){ startMsg('그곳은 orca가 길을 아는 지역(국제캠 주변 약 4km) 밖이에요.'); return; }
+  if (d > 300){ startMsg('그곳은 orca가 길을 아는 지역(국제캠 반경 약 5km) 밖이에요.'); return; }
   const G = graph().G, label = name.length > 12 ? name.slice(0, 12) + '…' : name;
   Object.keys(R).forEach(k => { if (k.startsWith('custom')) delete R[k]; });
   [START_OPTS, B.starts].forEach(a => { const i = a.findIndex(o => (o.id || o[0]) === 'custom'); if (i >= 0) a.splice(i, 1); });
@@ -456,17 +459,33 @@ async function findPlace(name, role = 'start'){
 // 내가 정한 출발지는 코스를 미리 만들어 두지 않았으니, 거리가 바뀔 때마다 그 자리에서 만든다
 function ensureRoutes(){
   if ((state.start !== 'custom' && !state.dest) || R[rkey(state.dist, 'flat')]) return Promise.resolve();
-  if (gen) return gen;
   const D = state.dist, key = rkey(D, ''), st = B.starts.find(x => x.id === state.start);
-  const s = st.node != null ? st.node : OrcaLoop.near(graph(), st.x, st.y)[0], tick = p => { genPct = p; renderCards(); };
+  if (gen && gen.key === key) return gen;
+  // 출발지·목적지·거리가 바뀌면 이전 생성은 다음 쉬는 틈에 멈춘다(tick이 false)
+  const s = st.node != null ? st.node : OrcaLoop.near(graph(), st.x, st.y)[0];
+  const tick = p => { if (rkey(D, '') !== key) return false; genPct = p; renderCards(); };
   genPct = 0;
   const job = state.dest ? OrcaLoop.makeRoutes(graph(), s, state.dest.node, D*1000, tick) : OrcaLoop.makeLoops(graph(), s, D*1000, tick);
-  return gen = job.then(out => { for (const t in out) R[key + t] = out[t]; gen = null; renderAll(true); });
+  const g = job.then(out => {
+    if (gen === g) gen = null;
+    if (!out) return ensureRoutes(); // 멈춘 생성: 지금 조건으로 다시
+    TERR_OPTS.forEach(([t]) => R[key + t] = out[t] || []);
+    if (out.direct) DIRECT[key] = out.direct;
+    renderAll(true);
+  });
+  g.key = key; return gen = g;
+}
+const DIRECT = {}; // 목적지 코스: 출발지→목적지 최단 거리(m)
+// 설정 거리보다 출발지~목적지가 멀면 늘릴 수 없으니, 그 사실을 알리고 가장 짧은 최적 코스로 안내한다
+function tooFarNote(){
+  const d = state.dest && DIRECT[rkey(state.dist, '')];
+  return d && d > state.dist*1000*1.05
+    ? '설정한 거리(' + state.dist + 'km)보다 출발지와 목적지 사이 거리(약 ' + (d/1000).toFixed(1) + 'km)가 길어, 가장 짧은 최적의 코스로 안내합니다.' : '';
 }
 // 목적지: 순환 대신 여기까지 가는 코스
 function setDest(name, x, y){
   const [node, d] = OrcaLoop.near(graph(), x, y);
-  if (d > 300){ startMsg('그 목적지는 orca가 길을 아는 지역(국제캠 주변 약 4km) 밖이에요.'); return; }
+  if (d > 300){ startMsg('그 목적지는 orca가 길을 아는 지역(국제캠 반경 약 5km) 밖이에요.'); return; }
   const G = graph().G, nx = G.nodes[2*node], ny = G.nodes[2*node+1];
   state.dest = {name, label:name.length > 12 ? name.slice(0, 12) + '…' : name, x:nx, y:ny, node, key:nx + ',' + ny};
   Object.assign(state, {sel:0, focus:-1}); startMsg(''); renderAll(true);
@@ -794,6 +813,7 @@ function renderStrip(){
   const r = current()[state.sel], line = document.getElementById('line');
   document.getElementById('strip-title').textContent = r ? NAMES[state.sel] + '선 · ' + courseName() + (state.rev ? ' (반대 방향)' : '') : '코스 없음';
   const bud = document.getElementById('budget'), shares = document.getElementById('shares');
+  document.getElementById('distnote').textContent = tooFarNote();
   if (!r){ line.innerHTML = ''; bud.textContent = ''; shares.innerHTML = ''; return; }
   const e = eta(r), mins = e.min;
   if (state.budget){

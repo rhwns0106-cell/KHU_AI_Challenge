@@ -90,7 +90,7 @@
         for (let it = 0; it < 3; it++) { c = loopOnce(P, s, th, R, spread); if (!c || Math.abs(c.L - D) / D < 0.08) break; R *= D / c.L; }
         if (c && Math.abs(c.L - D) / D < 0.12 && c.rep <= 0.25) cands.push(finish(P, c));
       }
-      if (tick) { tick((i + 1) / 16); await new Promise(r => setTimeout(r)); }
+      if (tick) { if (tick((i + 1) / 16) === false) return null; await new Promise(r => setTimeout(r)); }
     }
     const score = {flat: c => c.apk + c.rep*20 + c.steps*3, mild: c => Math.abs(c.apk - 12) + c.rep*20 + c.steps*3,
                    hill: c => -c.apk + c.rep*20, trail: c => -c.trail*40 + c.rep*20};
@@ -135,7 +135,7 @@
           off *= Math.max(0.3, Math.min(3, 1 + (T - L) / Math.max(L - Ld, 200)));
         }
         if (best && Math.abs(best.L - T) / T < 0.15) add(best.path, best.es, th);
-        if (tick) { tick((i + 1) / 12); await new Promise(r => setTimeout(r)); }
+        if (tick) { if (tick((i + 1) / 12) === false) return null; await new Promise(r => setTimeout(r)); }
       }
     }
     const cands = raw.map(c => {
@@ -154,6 +154,7 @@
       }
       out[k] = pick;
     }
+    out.direct = Math.round(Ld); // 출발지→목적지 최단 거리(설정 거리보다 길면 화면에서 알린다)
     return out;
   }
   // 간선 비용에 배수를 곱한 최단경로(다른 길 찾기용)
