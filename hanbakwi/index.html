@@ -42,6 +42,8 @@
 }
 *{box-sizing:border-box}
 html{background:var(--ground)}
+/* 상태바·하단 내비게이션 밑으로 그려지는 휴대폰(안드로이드 앱이 --safe-area-inset-*을 넣어 줌, 아이폰 사파리는 env)만큼 비운다 */
+body{padding:max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)) 0 max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))}
 body{margin:0;background:var(--ground);color:var(--porcelain);font-family:var(--kr);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
 ::selection{background:var(--cobalt);color:var(--on-accent)}
 *{scrollbar-width:thin;scrollbar-color:var(--rule) transparent}
