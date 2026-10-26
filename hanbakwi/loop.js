@@ -192,63 +192,6 @@
     try { return sp(P, s, t, pen); } finally { P.adj = save; }
   }
 
-  // 모양 코스(GPS 아트): 모양 윤곽(닫힌 다각형, 좌표 단위는 자유)을 원하는 거리에 맞게 키우고 12방향으로 돌려
-  // 첫 꼭짓점을 출발점에 놓은 뒤, 꼭짓점 사이를 실제 길 최단경로로 잇는다. 윤곽과 가장 닮은 3개를 고른다.
-  function shapeErr(route, tpl) { // 윤곽 표본점 ↔ 코스 점 평균 거리(양방향)를 모양 크기로 나눈 값
-    const near1 = (a, b) => { let s = 0; for (let i = 0; i < a.length; i += 2) { let m = Infinity; for (let j = 0; j < b.length; j += 2) { const d = (a[i]-b[j])**2 + (a[i+1]-b[j+1])**2; if (d < m) m = d; } s += Math.sqrt(m); } return s / (a.length / 2); };
-    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-    for (let i = 0; i < tpl.length; i += 2) { x0 = Math.min(x0, tpl[i]); x1 = Math.max(x1, tpl[i]); y0 = Math.min(y0, tpl[i+1]); y1 = Math.max(y1, tpl[i+1]); }
-    return (near1(tpl, route) + near1(route, tpl)) / 2 / Math.max(x1 - x0, y1 - y0, 1);
-  }
-  function sampleClosed(pts, step) { // 닫힌 다각형을 step 간격 점으로
-    const out = [];
-    for (let k = 0; k < pts.length; k++) {
-      const [ax, ay] = pts[k], [bx, by] = pts[(k + 1) % pts.length], L = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.round(L / step));
-      for (let i = 0; i < n; i++) out.push(ax + (bx - ax) * i / n, ay + (by - ay) * i / n);
-    }
-    return out;
-  }
-  async function makeShape(P, s, D, shape, tick, opts) {
-    setOpts(P, 'road', opts); // 모양 코스도 산길은 피하고 날씨 조건을 따른다
-    // 윤곽을 중심 원점·둘레 1로 정규화
-    let cx = 0, cy = 0; shape.forEach(([x, y]) => { cx += x; cy += y; }); cx /= shape.length; cy /= shape.length;
-    let per = 0; for (let k = 0; k < shape.length; k++) { const [ax, ay] = shape[k], [bx, by] = shape[(k + 1) % shape.length]; per += Math.hypot(bx - ax, by - ay); }
-    const unit = shape.map(([x, y]) => [(x - cx) / per, -(y - cy) / per]); // 화면 좌표(y 아래)로 그린 모양도 지도(y 위)에 똑바로
-    const sx = P.G.nodes[2*s], sy = P.G.nodes[2*s+1], cands = [];
-    for (let r = 0; r < 12; r++) {
-      const th = r * Math.PI / 6, cs = Math.cos(th), sn = Math.sin(th);
-      let k = D / 1.2, best = null;
-      for (let it = 0; it < 3; it++) {
-        const rot = unit.map(([x, y]) => [(x*cs - y*sn) * k, (x*sn + y*cs) * k]);
-        const ox = sx - rot[0][0], oy = sy - rot[0][1], poly = rot.map(([x, y]) => [x + ox, y + oy]);
-        const vs = [s]; poly.slice(1).forEach(([x, y]) => { const v = near(P, x, y)[0]; if (v !== vs[vs.length - 1]) vs.push(v); }); vs.push(s);
-        const pen = new Set(); let path = [s], es = [], ok = true;
-        for (let i = 0; i < vs.length - 1; i++) {
-          if (vs[i] === vs[i + 1]) continue;
-          const q = sp(P, vs[i], vs[i + 1], pen); if (!q) { ok = false; break; }
-          q.es.forEach(e => pen.add(e.id)); path = path.concat(q.path.slice(1)); es = es.concat(q.es);
-        }
-        if (!ok || es.length < 3) break;
-        const L = es.reduce((a, e) => a + e.L, 0);
-        best = {path, es, L, poly};
-        if (Math.abs(L - D) / D < 0.1) break;
-        k *= D / L;
-      }
-      if (best && Math.abs(best.L - D) / D < 0.2) {
-        let trail = 0, road = 0, shade = 0, steps = 0;
-        best.es.forEach(e => { if (e.f & 1) trail += e.L; if ((e.f & 256) && !(e.f & 32)) road += e.L; if (e.f & 512) shade += e.L; if (e.f & 2) steps++; });
-        const c = finish(P, {path: best.path, es: best.es, L: best.L, rep: 0, trail: trail / best.L, road: road / best.L, shade: shade / best.L, steps, th});
-        const tpl = sampleClosed(best.poly, 25);
-        c.shapeErr = shapeErr(c.pts, tpl); c.tpl = tpl.map(Math.round);
-        cands.push(c);
-      }
-      if (tick) { if (tick((r + 1) / 12) === false){ resetOpts(P); return null; } await pause(); }
-    }
-    resetOpts(P);
-    cands.sort((a, b) => a.shapeErr - b.shapeErr);
-    const pick = cands.slice(0, 3);
-    return {flat: pick, mild: pick, hill: pick, trail: pick};
-  }
 
   // 달리다 코스를 벗어났을 때: 지금 위치에서 앞쪽 남은 코스(100m~1km) 중 가장 덜 돌아가는 지점으로 붙는 길을 찾고,
   // 그 뒤는 원래 코스를 그대로 잇는다. 앞쪽만 보므로 출발점으로 돌아오는 순환은 유지된다.
@@ -270,5 +213,5 @@
                                  dist: Math.round(best.L + (n - 1 - best.i) * STEP), rerouted: true});
   }
 
-  root.OrcaLoop = {prep, near, makeLoops, makeRoutes, makeShape, rejoin};
+  root.OrcaLoop = {prep, near, makeLoops, makeRoutes, rejoin};
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -2,3 +2,4 @@
 data/dem/
 docs/
 tools/elev_cache.json
+tools/graph_build.log

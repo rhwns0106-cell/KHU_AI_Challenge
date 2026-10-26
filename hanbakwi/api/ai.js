@@ -7,11 +7,10 @@ const TASKS = {
   parse: {
     max: 200,
     system: '너는 러닝 코스 추천 앱의 조건 번역기다. 사용자의 말을 아래 JSON 하나로만 바꿔라. 설명·코드블록 없이 JSON만 출력.\n' +
-      '{"start": "gate"|"yeongtong"|"seocheon"|null, "place": 문자열|null, "here": true|false, "dest": 문자열|null, "weather": "wet"|"hot"|"clear"|null, "shape": 문자열|null, "km": 숫자|null, "minutes": 숫자|null, "terrain": "flat"|"mild"|"hill"|"trail"|null, "night": true|false}\n' +
+      '{"start": "gate"|"yeongtong"|"seocheon"|null, "place": 문자열|null, "here": true|false, "dest": 문자열|null, "weather": "wet"|"hot"|"clear"|null, "km": 숫자|null, "minutes": 숫자|null, "terrain": "flat"|"mild"|"hill"|"trail"|null, "night": true|false}\n' +
       'start: 경희대 정문·학교·캠퍼스=gate, 영통역(출구 번호 없이)=yeongtong, 서천생태공원=seocheon. ' +
       'place: 위 세 곳이 아닌 출발 장소를 사용자가 말하면 지도 검색에 쓸 이름만 짧게(예: "영통역 4번 출구", "서천동 행정복지센터"), 이때 start는 null. ' +
       'here: "여기서", "내 위치", "현재 위치"처럼 지금 있는 곳에서 출발하겠다고 하면 true. ' +
-      'shape: "별 모양", "고양이 얼굴 모양으로", "거북이 그리는 코스"처럼 코스 모양을 말하면 모양 이름만(예: "별", "고양이 얼굴", "거북이"), 없으면 null. ' +
       'weather: "비 온 뒤", "눈 왔어", "길이 젖었어"면 wet, "더워", "덥다", "폭염"이면 hot, "맑아"면 clear, 날씨 말이 없으면 null. ' +
       'dest: "○○까지", "○○로 가는", "○○에서 끝나게"처럼 도착할 곳을 말하면 그 장소 이름(예: "제2기숙사", "영통역"), 출발지로 돌아오는 코스면 null. ' +
       'novel: "새로운", "다른 코스", "안 뛰어본", "처음 가는"처럼 전에 뛴 길과 다른 코스를 원하면 true. ' +
@@ -32,16 +31,6 @@ const TASKS = {
     user: p => JSON.stringify(p.route || {}),
     tokens: 400
   },
-  shape: {
-    max: 100,
-    system: '너는 GPS 아트 러닝 코스 디자이너다. 모양 이름을 받아, 실제 도로를 따라 달려서 그릴 수 있는 단순한 한붓그리기 윤곽을 만든다. ' +
-      'JSON 하나로만 답해라: {"name": "한국어 모양 이름", "points": [[x, y], ...]}. 점은 8~24개, 좌표는 0~100, y는 아래로 커지는 화면 좌표. ' +
-      '바깥 테두리(실루엣)만 시계 방향으로 한 바퀴 도는 순서로 찍는다. 안쪽 점(눈·등껍질 무늬 등)은 절대 넣지 마라. ' +
-      '마지막 점과 첫 점은 자동으로 이어지고, 선끼리 교차하면 안 된다. 머리·귀·다리·꼬리처럼 실루엣에서 튀어나와 그 모양을 알아보게 하는 부분을 크게 과장하라. ' +
-      '예) 거북이: 둥근 등껍질 테두리를 돌다가 앞쪽에 머리 돌출, 아래쪽에 다리 4개 돌출, 뒤쪽에 짧은 꼬리 돌출. 설명·코드블록 없이 JSON만.',
-    user: p => String(p.name || '').slice(0, 30),
-    tokens: 500
-  },
   coach: {
     max: 800,
     system: '너는 달리는 사람 귀에 대고 말하는 러닝 코치다. 주어진 실시간 수치로 음성으로 읽을 한국어 한두 문장(합쳐 45자 이내)을 써라. ' +
@@ -53,7 +42,7 @@ const TASKS = {
   report: {
     max: 3000,
     system: '너는 러닝 코치다. 방금 끝난 달리기 기록(km별 페이스와 그 구간 상승량, 신호·정지 횟수, 본인 느낌)을 분석해 JSON 하나로만 답해라. ' +
-      '{"summary": "한두 문장 총평", "points": ["관찰 2~3개, 각 60자 이내, 반드시 수치 근거"], "next": {"dist": 0.5|1|2|3|5|7|10, "terrain": "flat"|"mild"|"hill"|"trail", "why": "다음 추천 이유 한 문장"}} ' +
+      '{"summary": "한두 문장 총평", "points": ["관찰 2~3개, 각 60자 이내, 반드시 수치 근거"], "next": {"dist": 0.5|1|2|3|5, "terrain": "flat"|"mild"|"hill"|"trail", "why": "다음 추천 이유 한 문장"}} ' +
       '목표 페이스는 주어지지 않으니 만들어 말하지 마라. 오르막 구간에서 느려진 것은 정상이라고 구분해서 말하라. 느낌이 힘들었으면 다음 추천을 쉽게, 쉬웠으면 어렵게. 기록에 없는 내용은 지어내지 마라. 존댓말(~요).',
     user: p => JSON.stringify(p.run || {}),
     tokens: 500

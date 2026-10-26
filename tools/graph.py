@@ -148,21 +148,40 @@ cache_path = os.path.join(HERE, 'elev_cache.json')
 cache = json.load(open(cache_path)) if os.path.exists(cache_path) else {}
 todo = sorted({cell(*nodes[o]) for o in keep} - {tuple(map(int, k.split(','))) for k in cache})
 print('elevation cells', len(todo), 'to fetch, cached', len(cache))
+# 1순위 OpenTopoData(SRTM 30m, 하루 1,000번). 한도(429)에 걸리면 Open-Meteo 고도(90m, 분당 제한)로 넘어간다
+provider = 'otd'
 for i in range(0, len(todo), 100):
     ch = todo[i:i + 100]
-    u = 'https://api.opentopodata.org/v1/srtm30m?locations=' + '|'.join(f'{a*DLA:.6f},{b*DLO:.6f}' for a, b in ch)
-    for _ in range(6):
+    for _ in range(8):
         try:
-            res = json.loads(urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=60).read())['results']
-            for (a, b), r in zip(ch, res): cache[f'{a},{b}'] = r['elevation']
+            if provider == 'otd':
+                u = 'https://api.opentopodata.org/v1/srtm30m?locations=' + '|'.join(f'{a*DLA:.6f},{b*DLO:.6f}' for a, b in ch)
+                res = [r['elevation'] for r in json.loads(urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=60).read())['results']]
+            else:
+                u = ('https://api.open-meteo.com/v1/elevation?latitude=' + ','.join(f'{a*DLA:.6f}' for a, b in ch)
+                     + '&longitude=' + ','.join(f'{b*DLO:.6f}' for a, b in ch))
+                res = json.loads(urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=60).read())['elevation']
+            for (a, b), r in zip(ch, res): cache[f'{a},{b}'] = r
             break
-        except Exception as e: print('retry', i, e, flush=True); time.sleep(5)
-    if i % 2000 == 0: json.dump(cache, open(cache_path, 'w')); print('elev', i, '/', len(todo), flush=True)
-    time.sleep(1.1)
+        except urllib.error.HTTPError as e:
+            print('retry', provider, i, e.code, flush=True)
+            if e.code == 429 and provider == 'otd': provider = 'om'; print('OpenTopoData 한도 → Open-Meteo로 전환', flush=True); continue
+            time.sleep(30 if e.code == 429 else 5)
+        except Exception as e: print('retry', provider, i, e, flush=True); time.sleep(5)
+    if i % 2000 == 0: json.dump(cache, open(cache_path, 'w')); print('elev', i, '/', len(todo), provider, flush=True)
+    time.sleep(1.1 if provider == 'otd' else 10)
 json.dump(cache, open(cache_path, 'w'))
 
+def elev_of(c):
+    v = cache.get('%d,%d' % c)
+    if v is not None: return v
+    for r in range(1, 6):
+        vs = [cache.get('%d,%d' % (c[0] + i, c[1] + j)) for i in range(-r, r + 1) for j in range(-r, r + 1)]
+        vs = [x for x in vs if x is not None]
+        if vs: return sum(vs) / len(vs)
+    return 0
 out = {'nodes': [v for o in keep for v in (round(nodes[o][0]), round(nodes[o][1]))],
-       'elev': [round((cache.get('%d,%d' % cell(*nodes[o])) or 0) * 10) for o in keep],  # 0.1m 단위
+       'elev': [round(elev_of(cell(*nodes[o])) * 10) for o in keep],  # 0.1m 단위
        'edges': [v for (a, b), f in edges.items() if a in remap and b in remap for v in (remap[a], remap[b], f)],
        'rest': rest,
        'sig': [v for o in keep if osm_of[o] in sig_kind for v in (remap[o], sig_kind[osm_of[o]])]}  # 신호 노드 [노드 번호, 1 보행자 건널목 | 2 차량 신호]...  # 쉴 곳 [x, y, 종류(1 벤치 2 쉼터 3 음수대 4 화장실 5 피크닉 테이블)]...
