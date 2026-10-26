@@ -26,7 +26,7 @@ const TASKS = {
       '수치에 없는 시설·경치·안전 정보는 지어내지 마라. 각 문장은 60자 이내, 끝은 "~예요/~해요/~세요"로 한 번만 맺는다("입니다요", "요요" 금지). ' +
       '경사는 뛰는 방향 기준이다: 오르막 0–2% 평지, 2–5% 완만, 5–8% 오르막, 8% 이상 급경사, -2% 이하는 내리막(share_pct.down). 8% 이상을 쉽다거나 무리 없다고 말하지 마라. ' +
       '내리막이 많으면 무릎 부담과 속도 조절을 짧게 언급해도 된다. weather.mode가 wet이면 미끄럼 주의, hot이면 그늘 비율(shade_pct)과 수분 섭취를 짧게 말해라. rest_stops가 있으면 쉬는 곳을 한 문장으로 알려라. signals는 코스가 지나는 신호 건널목 수, road_without_sidewalk_pct는 인도 없는 차도 비율이다(10% 넘으면 차 조심을 짧게). ' +
-      'time_budget_min이 있으면 예상 시간과 비교해 남거나 넘는 시간을 한 문장에 말해라. ' +
+      'time_budget_min이 있으면 예상 시간과 비교해 남거나 넘는 시간을 한 문장에 말해라. 넘으면 페이스를 올리라고 하지 말고 더 짧은 코스를 고르라고 권해라. ' +
       '설명·코드블록 없이 JSON 문자열 배열 하나로만 출력: ["문장1","문장2",...]',
     user: p => JSON.stringify(p.route || {}),
     tokens: 400
@@ -58,6 +58,14 @@ const TASKS = {
   }
 };
 
+// 작업별로 화면이 기대하는 모양인지 확인(아니면 화면은 규칙 결과를 그대로 쓴다)
+const SHAPE = {
+  parse: v => v && typeof v === 'object' && !Array.isArray(v),
+  brief: v => Array.isArray(v) && v.length > 0 && v.every(x => typeof x === 'string'),
+  report: v => v && typeof v.summary === 'string',
+  refine: v => v && typeof v.pick === 'string',
+  coach: v => typeof v === 'string' && v.length > 0
+};
 function json(text){
   const m = String(text).match(/[\[{][\s\S]*[\]}]/); // 모델이 코드블록으로 감싸도 본문만 꺼낸다
   return JSON.parse(m ? m[0] : text);
@@ -76,12 +84,15 @@ module.exports = async (req, res) => {
       method: 'POST',
       headers: {'Authorization': 'Bearer ' + process.env.BAZE_API_KEY, 'Content-Type': 'application/json'},
       body: JSON.stringify({model: MODEL, max_tokens: t.tokens, messages: [
-        {role: 'system', content: t.system}, {role: 'user', content: t.user(payload || {})}]})
+        {role: 'system', content: t.system}, {role: 'user', content: t.user(payload || {})}]}),
+      signal: AbortSignal.timeout(9000) // 브라우저는 10초에 포기하니 그 전에 끊는다
     });
     if (!r.ok) return res.status(502).json({error: 'AI 응답 실패 (' + r.status + ')'});
     const data = await r.json();
     const text = data.choices[0].message.content;
-    return res.status(200).json({result: task === 'coach' ? String(text).trim().slice(0, 120) : json(text), model: MODEL});
+    const result = task === 'coach' ? String(text).trim().slice(0, 120) : json(text);
+    if (!SHAPE[task](result)) return res.status(502).json({error: 'AI 응답 형식이 맞지 않아요'});
+    return res.status(200).json({result, model: MODEL});
   } catch (e) {
     return res.status(502).json({error: 'AI 응답을 읽지 못했어요'});
   }

@@ -144,6 +144,10 @@ canvas.drag{cursor:grabbing}
 .course[aria-pressed="true"] .badge{background:var(--cobalt);color:var(--on-accent)}
 .course b{display:block;font-size:15px;font-weight:800}
 .course small{display:block;font-size:13px;color:var(--muted)}
+.course .tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.course .tags i{font-style:normal;font-size:12px;font-weight:700;padding:2px 7px;border-radius:999px;background:var(--panel);color:var(--porcelain)}
+.course .tags i.ok{color:var(--flat)}
+.course .tags i.no{color:var(--up)}
 .course .km{font-family:var(--num);font-size:26px;font-weight:600;line-height:1}
 .course .km em{font-style:normal;font-size:14px;color:var(--muted);margin-left:2px}
 .empty{margin:0;padding:16px 4px;color:var(--muted);border-bottom:1px solid var(--rule)}
@@ -325,7 +329,7 @@ canvas.drag{cursor:grabbing}
       <p class="fine inbrief" id="briefsrc" aria-live="polite"></p>
     </section>
 
-    <p class="fine">코스는 OpenStreetMap 도로·보행로 위에서 경로 알고리즘으로 만들었고, 경사는 SRTM 30m 고도를 약 100m 격자로 받아 계산했습니다. 격자가 성겨서 짧은 언덕과 계단은 실제보다 완만하게 나올 수 있어요. 본 서비스는 국토지리정보원 5m 고도 데이터로 바꿀 예정입니다.</p>
+    <p class="fine">코스는 OpenStreetMap 도로·보행로 위에서 경로 알고리즘으로 만들었고, 경사는 SRTM 고도를 약 30m 칸으로 받아 길의 각 지점에 넣어 계산했습니다. 원자료 해상도의 한계로 아주 짧은 언덕과 계단은 실제보다 완만하게 나올 수 있어요. 본 서비스는 국토지리정보원 5m 고도 데이터로 바꿀 예정입니다.</p>
   </main>
 </div>
 
@@ -381,8 +385,8 @@ function parseAsk(text){
   let m = t.match(/(\d+(?:\.\d+)?)\s*(km|키로|킬로|k)/i);
   if (m) out.km = parseFloat(m[1]);
   else if ((m = t.match(/(\d+)\s*(m|미터)(?![a-z])/i))) out.km = parseInt(m[1], 10) / 1000;
-  else if ((m = t.match(/(\d+)\s*분/))){ out.min = parseInt(m[1],10); out.km = out.min / PACE; }
-  else if ((m = t.match(/(\d+)\s*시간/))){ out.min = parseInt(m[1],10) * 60; out.km = out.min / PACE; }
+  else if ((m = t.match(/(\d+)\s*분/))) out.min = parseInt(m[1],10);
+  else if ((m = t.match(/(\d+)\s*시간/))) out.min = parseInt(m[1],10) * 60;
   if (/산|숲|트레일|흙길/.test(t)) out.terr = 'trail';
   else if (/오르막\s*(싫|말고|빼|없)|평지|평탄|가볍|살살|회복|초보|무릎/.test(t)) out.terr = 'flat';
   else if (/완만|적당/.test(t)) out.terr = 'mild';
@@ -395,6 +399,8 @@ function parseAsk(text){
   if (/같은 거리|같은 시간|지난번|저번|어제랑/.test(t)) out.repeat_last = true;
   return out;
 }
+// 시간 예산 안에 드는 가장 긴 거리: 페이스 거리 + 신호·오르막 여유 15%
+function budgetDist(min){ const fit = DIST_OPTS.map(d=>d[0]).filter(d => d*PACE*1.15 <= min); return fit.length ? fit[fit.length-1] : DIST_OPTS[0][0]; }
 function nearestDist(km){ return DIST_OPTS.map(d=>d[0]).reduce((a,b)=>Math.abs(b-km)<Math.abs(a-km)?b:a); }
 /* ChatKHU 호출(/api/ai). 실패하거나 느리면 null → 화면은 규칙 결과를 그대로 쓴다 */
 async function ai(task, payload){
@@ -413,8 +419,7 @@ async function applyAsk(){
   if (seq !== askSeq) return;
   const it = a || rule;
   if (a){
-    const km = a.km || (a.minutes ? a.minutes / PACE : null);
-    applyParsed({start:a.start || undefined, km:km || undefined, min:a.minutes || undefined, terr:a.terrain || undefined}, 'ai',
+    applyParsed({start:a.start || undefined, km:a.km || undefined, min:a.minutes || undefined, terr:a.terrain || undefined}, 'ai',
                 [it.repeat_last && '지난번과 같은 거리', it.novel && '안 뛰어본 코스'].filter(Boolean));
   }
   if (it.repeat_last) await useLastRun(!!(a && (a.km || a.minutes)));
@@ -566,7 +571,11 @@ function applyParsed(p, source, extra = []){
   const chips = [...extra];
   state.budget = p.min || null;
   if (p.start){ state.start = p.start; chips.push(START_OPTS.find(s=>s[0]===p.start)[1] + ' 출발'); }
-  if (p.km){ state.dist = nearestDist(p.km); chips.push((p.min ? p.min + '분 · ' : '') + state.dist + 'km 코스'); }
+  if (p.km){
+    state.dist = nearestDist(p.km); chips.push((p.min ? p.min + '분 · ' : '') + state.dist + 'km 코스');
+    // 고를 수 있는 거리(500m~5km)로 바꿨으면 조용히 넘기지 않고 알린다
+    if (Math.abs(state.dist - p.km) > 0.05) chips.push(p.km > 5 ? '지도 범위상 최대 5km라 5km로 맞췄어요' : p.km + 'km 대신 가장 가까운 ' + state.dist + 'km');
+  } else if (p.min){ state.dist = budgetDist(p.min); chips.push(p.min + '분 안 · ' + state.dist + 'km 코스'); }
   if (p.terr){ state.terr = p.terr; chips.push(TERR_OPTS.find(o=>o[0]===p.terr)[1]); }
   state.sel = 0; state.focus = -1;
   const box = document.getElementById('parsed');
@@ -625,7 +634,7 @@ const GRADE_NAMES = ['평지','완만','오르막','급경사','내리막'];
 function gradeColor(g){ return css(GRADE_VARS[gradeClass(g)]); }
 function grades(r){
   const el = r.el, n = el.length, g = new Array(n).fill(0);
-  // 고도 격자가 약 100m라 그보다 짧은 기울기는 잡음: 앞뒤 2표본(약 125m)으로 계산
+  // 고도 칸(약 30m)보다 짧은 기울기는 잡음: 앞뒤 2표본(약 100m)으로 계산
   for (let i=0;i<n;i++){ const a=Math.max(0,i-2), b=Math.min(n-1,i+2); g[i] = (el[b]-el[a]) / ((b-a)*STEP) * 100; }
   return g;
 }
@@ -937,7 +946,11 @@ function renderStrip(){
   const e = eta(r), mins = e.min;
   if (state.budget){
     const d = state.budget - mins;
-    bud.innerHTML = '예상 ' + mins + '분 · 공강 ' + state.budget + '분 ' + (d >= 0 ? '<b>' + d + '분 남음</b>' : '<b class="over">' + (-d) + '분 넘음</b>') + '<br>' + etaNote(e);
+    const fit = budgetDist(state.budget), shorter = fit < state.dist ? fit : DIST_OPTS.map(o=>o[0]).filter(o => o < state.dist).pop();
+    bud.innerHTML = '예상 ' + mins + '분 · 가진 시간 ' + state.budget + '분 · ' + (d >= 0 ? '<b>' + d + '분 남음</b>' : '<b class="over">' + (-d) + '분 넘음</b>') + '<br>' + etaNote(e) +
+      (d < 0 && shorter ? '<br><button type="button" class="linkbtn" id="shortbtn">시간이 부족해요. ' + (shorter < 1 ? shorter*1000 + 'm' : shorter + 'km') + ' 코스로 바꿀까요?</button>' : '');
+    const sb = document.getElementById('shortbtn');
+    if (sb) sb.onclick = () => { state.dist = shorter; state.sel = 0; state.focus = -1; renderAll(true); };
   } else bud.innerHTML = '예상 <b>' + mins + '분</b> · ' + etaNote(e);
   // 구간 경사 띠
   const g = grades(r), n = g.length; let segs = '', st = 0;
@@ -967,17 +980,36 @@ function renderCards(){
   const rs = current(), el = document.getElementById('cards');
   if (!rs.length){ el.innerHTML = '<p class="empty">' + (gen ? '코스를 실제 길 위에 만드는 중이에요… ' + Math.round(genPct*100) + '%' : '이 조건에 맞는 코스가 아직 없어요. 거리나 지형을 바꿔보세요.') + '</p>'; return; }
   el.innerHTML = '';
+  const why = courseReasons(rs);
   rs.forEach((r, i) => {
     const b = document.createElement('button'); b.type='button'; b.className='course';
     b.setAttribute('aria-pressed', String(i === state.sel));
     b.innerHTML =
       '<span class="badge">' + NAMES[i] + '</span>' +
       '<span><b>' + NAMES[i] + '선 · ' + courseName() + '</b>' +
-      '<small>' + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · ' + (wxMode() === 'hot' ? '그늘 ' + Math.round((r.shade || 0)*100) + '% · ' : '') + (wxMode() === 'wet' ? '5% 넘는 경사 ' + Math.round((r.share[2] + r.share[3])*100) + '% · ' : '') + (r.trail > 0.02 ? '산길 ' + Math.round(r.trail*100) + '% · ' : '') + (r.road > 0.1 ? '골목 차도 ' + Math.round(r.road*100) + '% · ' : '') + '상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small></span>' +
+      '<small>' + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · ' + (wxMode() === 'hot' ? '그늘 ' + Math.round((r.shade || 0)*100) + '% · ' : '') + (wxMode() === 'wet' ? '5% 넘는 경사 ' + Math.round((r.share[2] + r.share[3])*100) + '% · ' : '') + (r.trail > 0.02 ? '산길 ' + Math.round(r.trail*100) + '% · ' : '') + (r.road > 0.1 ? '골목 차도 ' + Math.round(r.road*100) + '% · ' : '') + '상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small>' +
+      '<span class="tags">' + (why[i] ? '<i>' + why[i] + '</i>' : '') + checks(r).map(([ok, t]) => '<i class="' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓ ' : '! ') + t + '</i>').join('') + '</span></span>' +
       '<span class="km">' + (r.dist/1000).toFixed(2) + '<em>km</em></span>';
     b.addEventListener('click', () => { state.sel = i; state.focus = -1; renderAll(false); });
     el.appendChild(b);
   });
+}
+// 후보끼리 비교해 각 코스가 가장 나은 점 하나(겹치면 다음 것)
+function courseReasons(rs){
+  if (rs.length < 2) return [];
+  const best = f => rs.reduce((bi, r, i) => f(r) < f(rs[bi]) ? i : bi, 0), out = [];
+  [[r => eta(r).min, state.budget ? '시간 여유가 가장 많아요' : '가장 빨리 끝나요'], [r => r.asc, '오르막이 가장 적어요'], [r => eta(r).sig, '신호 건널목이 가장 적어요'], [r => r.road || 0, '차도 구간이 가장 적어요'],
+   [r => r.maxg, '최대 경사가 가장 낮아요'], [r => r.share[2] + r.share[3], '가파른 구간이 가장 짧아요']]
+    .forEach(([f, t]) => { const i = best(f); if (!out[i] && rs.some(r => f(r) !== f(rs[i]))) out[i] = t; }); // 모두 같은 값이면 이유가 아니다
+  return out;
+}
+// 사용자가 건 조건을 이 코스가 지키는지: [충족?, 문구]
+function checks(r){
+  const out = [], hard = r.share[2] + r.share[3];
+  if (state.budget){ const d = state.budget - eta(r).min; out.push([d >= 0, d >= 0 ? state.budget + '분 안' : state.budget + '분을 ' + (-d) + '분 넘음']); }
+  if (state.terr === 'flat') out.push([hard < 0.05 && r.maxg < 8 && !r.steps, hard < 0.05 && r.maxg < 8 && !r.steps ? '평지 조건 충족' : '평지 조건 일부 미충족 (5% 넘는 경사 ' + Math.round(hard*100) + '%' + (r.steps ? ', 계단 ' + r.steps + '곳' : '') + ')']);
+  if (state.terr === 'mild') out.push([hard < 0.15, hard < 0.15 ? '완만 조건 충족' : '완만 조건 일부 미충족 (5% 넘는 경사 ' + Math.round(hard*100) + '%)']);
+  return out;
 }
 function renderProfile(){
   const svg = document.getElementById('profile'), r = current()[state.sel];
