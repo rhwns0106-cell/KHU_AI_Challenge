@@ -34,7 +34,7 @@ public class RunNotifyPlugin extends Plugin {
         String text = call.getString("text", "");
         Intent open = c.getPackageManager().getLaunchIntentForPackage(c.getPackageName());
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, CH) : new Notification.Builder(c);
-        b.setContentTitle(call.getString("title", "orca"))
+        b.setContentTitle(call.getString("title", "RUNKHU"))
             .setContentText(text)
             .setStyle(new Notification.BigTextStyle().bigText(text))
             .setSmallIcon(R.drawable.ic_stat_orca)
