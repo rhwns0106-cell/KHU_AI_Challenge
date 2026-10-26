@@ -234,7 +234,8 @@ canvas.drag{cursor:grabbing}
       <button class="mapbtn" id="zin" type="button" aria-label="확대"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 3v12M3 9h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
       <button class="mapbtn" id="zout" type="button" aria-label="축소"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
       <button class="mapbtn basebtn" id="basebtn" type="button" aria-label="바탕 지도 바꾸기">위성</button>
-      <button class="mapbtn" id="fit" type="button" aria-label="코스 전체 보기"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="4.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 1.5v3M10 15.5v3M1.5 10h3M15.5 10h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+      <button class="mapbtn" id="northbtn" type="button" aria-label="북쪽을 위로" hidden><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" style="transition:transform .15s"><path d="M10 2l4 8h-8z" fill="#E5322D"/><path d="M10 18l-4-8h8z" fill="currentColor" opacity=".45"/></svg></button>
+      <button class="mapbtn" id="fit" type="button" aria-label="내 위치, 보는 방향을 위로"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="4.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 1.5v3M10 15.5v3M1.5 10h3M15.5 10h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     </div>
     <div class="legend" aria-label="경사 구분">
       <span><i style="background:var(--flat)"></i>평지<small> 0–2%</small></span>
@@ -696,7 +697,7 @@ function courseName(){ return state.dest ? startName() + ' → ' + endName() : s
 
 /* ---------- 지도 ---------- */
 const cv = document.getElementById('map'), ctx = cv.getContext('2d');
-const view = {cx:0, cy:0, s:0.2};
+const view = {cx:0, cy:0, s:0.2, rot:0, headUp:true};
 let dpr = 1;
 const paths = {};
 function mkPath(flat, close){
@@ -720,9 +721,18 @@ function resize(){
   draw();
 }
 let F = null; // 이번 그리기의 화면 변환(미터 평면 → 화면)
+// 방위 h가 위로 오게: 화면 = p0 + s·(dx·cos h − dy·sin h, −(dx·sin h + dy·cos h))
 function frame(){
-  return {x0:view.cx, y0:view.cy, px:cv.width/dpr/2, py:cv.height/dpr/2, ax:view.s, ay:0, bx:0, by:-view.s, s:view.s};
+  const r = view.rot*Math.PI/180, c = Math.cos(r)*view.s, n = Math.sin(r)*view.s;
+  return {x0:view.cx, y0:view.cy, px:cv.width/dpr/2, py:cv.height/dpr/2, ax:c, ay:-n, bx:-n, by:-c, s:view.s};
 }
+// 화면 → 미터 평면(toScreen의 역)
+function fromScreen(sx, sy){
+  const r = view.rot*Math.PI/180, c = Math.cos(r), n = Math.sin(r), u = (sx - cv.width/dpr/2)/view.s, v = -(sy - cv.height/dpr/2)/view.s;
+  return [view.cx + u*c + v*n, view.cy - u*n + v*c];
+}
+// 보는 방향: 나침반, 없으면 달리는 방향
+function headingNow(){ return COMPASS != null ? COMPASS : run.mode !== 'idle' ? run.heading : null; }
 function toScreen(x, y){ const f = F || frame(); return [f.px + (x - f.x0)*f.ax + (y - f.y0)*f.bx, f.py + (x - f.x0)*f.ay + (y - f.y0)*f.by]; }
 
 function ring(x, y, r, w, stroke){
@@ -752,7 +762,8 @@ function startCompass(){
     if (COMPASS == null || Math.abs(angDiff(h, COMPASS)) > 3){ COMPASS = h; queueDraw(); }
   };
   const go = () => addEventListener('ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation', on);
-  if (DeviceOrientationEvent.requestPermission) DeviceOrientationEvent.requestPermission().then(r => r === 'granted' && go()).catch(() => { compassOn = false; });
+  // 터치 없이 부르면 거절되니(아이폰·최신 크롬) 거절되면 다음 터치 때 다시 묻는다
+  if (DeviceOrientationEvent.requestPermission) DeviceOrientationEvent.requestPermission().then(r => r === 'granted' ? go() : (compassOn = false)).catch(() => { compassOn = false; });
   else go();
 }
 // 테마: 자동(기기 설정) / 라이트 / 다크. 고른 값은 이 기기에만 기억한다
@@ -782,8 +793,9 @@ function drawTiles(W, H, s){
   const lon = x => LO0 + x/KX, lat = y => LA0 + y/KY;
   const tx = lo => (lo + 180)/360*N, ty = la => (1 - Math.log(Math.tan(la/R2D) + 1/Math.cos(la/R2D))/Math.PI)/2*N;
   const ix = t => (t/N*360 - 180 - LO0)*KX, iy = t => (Math.atan(Math.sinh(Math.PI*(1 - 2*t/N)))*R2D - LA0)*KY;
-  const x0 = Math.floor(tx(lon(view.cx - W/2/s))), x1 = Math.floor(tx(lon(view.cx + W/2/s)));
-  const y0 = Math.floor(ty(lat(view.cy + H/2/s))), y1 = Math.floor(ty(lat(view.cy - H/2/s)));
+  const R = (view.rot % 360 ? Math.hypot(W, H)/2 : 0)/s, hw = Math.max(W/2/s, R), hh = Math.max(H/2/s, R);
+  const x0 = Math.floor(tx(lon(view.cx - hw))), x1 = Math.floor(tx(lon(view.cx + hw)));
+  const y0 = Math.floor(ty(lat(view.cy + hh))), y1 = Math.floor(ty(lat(view.cy - hh)));
   for (const u of B_.urls) for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++){
     const img = tile(u(z, x, y));
     if (img){ const L = ix(x), Rr = ix(x+1), T = iy(y), Bt = iy(y+1); ctx.drawImage(img, L, -T, Rr - L, T - Bt); }
@@ -791,7 +803,10 @@ function drawTiles(W, H, s){
 }
 function draw(){
   const W = cv.width/dpr, H = cv.height/dpr;
+  if (view.headUp && headingNow() != null) view.rot = headingNow();
   F = frame(); const s = F.s;
+  const nb = document.getElementById('northbtn');
+  if (nb){ nb.hidden = Math.abs(angDiff(view.rot, 0)) < 1; nb.firstElementChild.style.transform = 'rotate(' + (-view.rot) + 'deg)'; }
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.fillStyle = css('--map-bg'); ctx.fillRect(0,0,W,H);
   // 그림 좌표는 (x, -y): 화면 = p0 + (x-x0)·a + (y-y0)·b
@@ -888,34 +903,44 @@ function fit(){
   const rs = current(); let xs=[], ys=[];
   rs.forEach(r => { for (let i=0;i<r.pts.length;i+=2){ xs.push(r.pts[i]); ys.push(r.pts[i+1]); } });
   if (!xs.length){ const st = B.starts.find(s=>s.id===state.start); xs=[st.x-800,st.x+800]; ys=[st.y-800,st.y+800]; }
-  const x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys);
+  const r = view.rot*Math.PI/180, c = Math.cos(r), n = Math.sin(r);
+  const us = xs.map((x, i) => x*c - ys[i]*n), vs = xs.map((x, i) => x*n + ys[i]*c);
+  const u0=Math.min(...us), u1=Math.max(...us), v0=Math.min(...vs), v1=Math.max(...vs), uc=(u0+u1)/2, vc=(v0+v1)/2;
   const W = cv.width/dpr, H = cv.height/dpr;
-  view.cx=(x0+x1)/2; view.cy=(y0+y1)/2;
-  view.s = Math.min((W-80)/(x1-x0||1), (H-110)/(y1-y0||1));
+  view.cx = uc*c + vc*n; view.cy = -uc*n + vc*c;
+  view.s = Math.min((W-80)/(u1-u0||1), (H-110)/(v1-v0||1));
 }
-function zoomAt(f, sx, sy){
-  const W = cv.width/dpr, H = cv.height/dpr;
-  const wx = view.cx + (sx - W/2)/view.s, wy = view.cy - (sy - H/2)/view.s;
-  view.s = Math.min(3, Math.max(0.05, view.s*f));
-  view.cx = wx - (sx - W/2)/view.s; view.cy = wy + (sy - H/2)/view.s;
+// 확대·회전: 손가락 아래 지점(sx, sy)을 그대로 둔다
+function zoomAt(f, sx, sy, dRot = 0){
+  const [wx, wy] = fromScreen(sx, sy);
+  view.s = Math.min(3, Math.max(0.05, view.s*f)); view.rot = (view.rot + dRot + 360) % 360;
+  const [nx, ny] = fromScreen(sx, sy); view.cx += wx - nx; view.cy += wy - ny;
   draw();
 }
 const ptrs = new Map(); let pinch0 = null;
-cv.addEventListener('pointerdown', e => { tap0 = [e.offsetX, e.offsetY]; run.follow = false; cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.offsetX, e.offsetY]); cv.classList.add('drag'); });
+cv.addEventListener('pointerdown', e => { startCompass(); tap0 = [e.offsetX, e.offsetY]; run.follow = false; try { cv.setPointerCapture(e.pointerId); } catch(_){} ptrs.set(e.pointerId, [e.offsetX, e.offsetY]); cv.classList.add('drag'); });
 cv.addEventListener('pointermove', e => {
   if (!ptrs.has(e.pointerId)) return;
   const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.offsetX, e.offsetY]);
-  if (ptrs.size === 1){ view.cx -= (e.offsetX-prev[0])/view.s; view.cy += (e.offsetY-prev[1])/view.s; draw(); }
+  if (ptrs.size === 1){
+    const [ax, ay] = fromScreen(prev[0], prev[1]), [bx, by] = fromScreen(e.offsetX, e.offsetY);
+    view.cx += ax - bx; view.cy += ay - by; draw();
+  }
   else if (ptrs.size === 2){
-    const [a,b] = [...ptrs.values()]; const d = Math.hypot(a[0]-b[0], a[1]-b[1]);
-    if (pinch0) zoomAt(d/pinch0, (a[0]+b[0])/2, (a[1]+b[1])/2);
-    pinch0 = d;
+    const [a,b] = [...ptrs.values()], d = Math.hypot(a[0]-b[0], a[1]-b[1]), ang = Math.atan2(b[1]-a[1], b[0]-a[0])*180/Math.PI;
+    if (pinch0){
+      // 손가락을 비튼 만큼 지도도 돈다. 조금(8°) 넘게 비틀어야 '보는 방향 위' 모드가 풀린다(확대하다 실수로 돌지 않게)
+      let dr = -angDiff(pinch0.ang, ang); pinch0.turn += dr;
+      if (view.headUp && Math.abs(pinch0.turn) < 8) dr = 0; else if (view.headUp){ view.headUp = false; dr = pinch0.turn; }
+      zoomAt(d/pinch0.d, (a[0]+b[0])/2, (a[1]+b[1])/2, dr);
+      pinch0.d = d; pinch0.ang = ang;
+    } else pinch0 = {d, ang, turn:0};
   }
 });
 let tap0 = null;
 function up(e){
   if (pickMode && tap0 && Math.hypot(e.offsetX - tap0[0], e.offsetY - tap0[1]) < 6){
-    const wx = view.cx + (e.offsetX - cv.width/dpr/2)/view.s, wy = view.cy - (e.offsetY - cv.height/dpr/2)/view.s;
+    const [wx, wy] = fromScreen(e.offsetX, e.offsetY);
     if (pickMode === 'dest') setDest('지도에서 고른 도착지', wx, wy); else setCustom('지도에서 고른 곳', wx, wy);
     pickMode = false;
   }
@@ -932,7 +957,16 @@ document.getElementById('basebtn').onclick = e => {
 };
 document.getElementById('basebtn').hidden = !VWORLD_KEY;
 if (VWORLD_KEY) document.getElementById('attr').textContent = BASES[base].attr + ' · © OpenStreetMap · SRTM';
-document.getElementById('fit').onclick = () => { state.focus = -1; fit(); renderStrip(); draw(); };
+document.getElementById('fit').onclick = () => {
+  startCompass(); view.headUp = true; state.focus = -1;
+  if (run.mode !== 'idle' && run.pos){ run.follow = true; flyTo(run.pos.x, run.pos.y); return; }
+  if (!navigator.geolocation || !window.isSecureContext){ fit(); renderStrip(); draw(); return; }
+  navigator.geolocation.getCurrentPosition(p => {
+    ME = {x:(p.coords.longitude - LO0)*KX, y:(p.coords.latitude - LA0)*KY, acc:p.coords.accuracy}; flyTo(ME.x, ME.y);
+  }, () => { fit(); renderStrip(); draw(); }, {enableHighAccuracy:true, timeout:10000, maximumAge:5000});
+};
+// 나침반 버튼(지도가 돌아가 있을 때만): 북쪽을 위로
+document.getElementById('northbtn').onclick = () => { view.headUp = false; zoomAt(1, cv.width/dpr/2, cv.height/dpr/2, -view.rot); };
 
 /* 역으로 날아가기: 짧게 감속하며 이동 */
 let anim = 0;
@@ -1292,7 +1326,7 @@ function drawMe(){
   const [x, y] = toScreen(p.x, p.y), c = css('--cobalt'), hd = COMPASS != null ? COMPASS : run.mode !== 'idle' ? run.heading : null;
   ctx.beginPath(); ctx.arc(x, y, Math.max(10, (p.acc || 0)*view.s), 0, Math.PI*2); ctx.globalAlpha = .15; ctx.fillStyle = c; ctx.fill(); ctx.globalAlpha = 1;
   if (hd != null){
-    ctx.save(); ctx.translate(x, y); ctx.rotate(hd*Math.PI/180);
+    ctx.save(); ctx.translate(x, y); ctx.rotate((hd - view.rot)*Math.PI/180);
     const g = ctx.createRadialGradient(0, 0, 6, 0, 0, 52); g.addColorStop(0, c + 'B0'); g.addColorStop(1, c + '00');
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 52, -Math.PI/2 - 0.45, -Math.PI/2 + 0.45); ctx.closePath(); ctx.fillStyle = g; ctx.fill();
     ctx.beginPath(); ctx.moveTo(0, -19); ctx.lineTo(6, -11); ctx.lineTo(-6, -11); ctx.closePath(); ctx.fillStyle = c; ctx.fill(); // 점 위 작은 삼각형
@@ -1553,6 +1587,8 @@ let theme0 = 'auto'; try { theme0 = localStorage.getItem('orca.theme') || 'auto'
 document.getElementById('themebtn').onclick = () => { const order = ['auto', 'light', 'dark'], cur = document.documentElement.dataset.theme || 'auto'; applyTheme(order[(order.indexOf(cur) + 1) % 3]); };
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { draw(); renderProfile(); });
 applyTheme(theme0);
+startCompass();
+if (location.hostname === 'localhost') window.__test = {compass: h => { COMPASS = h; draw(); }, view}; // 개발 서버에서만: 나침반 없는 PC로 회전 시험
 resize(); applyAsk(); renderRun(); loadHistory(); loadWeather();
 })();
 </script>
