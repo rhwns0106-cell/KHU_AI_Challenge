@@ -278,9 +278,9 @@ canvas.drag{cursor:grabbing}
 <script>
 (function(){
 const DATA = window.HANBAKWI_DATA;
-const B = DATA.base, R = DATA.routes;
+const B = DATA.base, R = {}; // DATA.routes(옛 규칙으로 미리 만든 코스)는 쓰지 않는다
 const START_OPTS = B.starts.map(s => [s.id, s.name]);
-const DIST_OPTS = [[3,'3km'],[5,'5km'],[7,'7km'],[10,'10km']];
+const DIST_OPTS = [[0.5,'500m'],[1,'1km'],[2,'2km'],[3,'3km'],[5,'5km'],[7,'7km'],[10,'10km']];
 const TERR_OPTS = [['flat','평지 위주'],['mild','완만'],['hill','언덕 훈련'],['trail','산길']];
 const PACE = 6.5; // 분/km, 예상 시간 계산용
 const STEP = 25;  // 고도 표본 간격(m)
@@ -312,6 +312,7 @@ function parseAsk(text){
   const out = {};
   let m = t.match(/(\d+(?:\.\d+)?)\s*(km|키로|킬로|k)/i);
   if (m) out.km = parseFloat(m[1]);
+  else if ((m = t.match(/(\d+)\s*(m|미터)(?![a-z])/i))) out.km = parseInt(m[1], 10) / 1000;
   else if ((m = t.match(/(\d+)\s*분/))){ out.min = parseInt(m[1],10); out.km = out.min / PACE; }
   else if ((m = t.match(/(\d+)\s*시간/))){ out.min = parseInt(m[1],10) * 60; out.km = out.min / PACE; }
   if (/산|숲|트레일|흙길/.test(t)) out.terr = 'trail';
@@ -458,22 +459,22 @@ async function findPlace(name, role = 'start'){
 }
 // 내가 정한 출발지는 코스를 미리 만들어 두지 않았으니, 거리가 바뀔 때마다 그 자리에서 만든다
 function ensureRoutes(){
-  if ((state.start !== 'custom' && !state.dest) || R[rkey(state.dist, 'flat')]) return Promise.resolve();
-  const D = state.dist, key = rkey(D, ''), st = B.starts.find(x => x.id === state.start);
-  if (gen && gen.key === key) return gen;
+  if (R[rkey()]) return Promise.resolve();
+  const D = state.dist, pref = state.terr === 'trail' ? 'trail' : 'road', key = rkey(D, ''), st = B.starts.find(x => x.id === state.start);
+  if (gen && gen.key === key + pref) return gen;
   // 출발지·목적지·거리가 바뀌면 이전 생성은 다음 쉬는 틈에 멈춘다(tick이 false)
   const s = st.node != null ? st.node : OrcaLoop.near(graph(), st.x, st.y)[0];
-  const tick = p => { if (rkey(D, '') !== key) return false; genPct = p; renderCards(); };
+  const tick = p => { if (rkey(D, '') !== key || (state.terr === 'trail' ? 'trail' : 'road') !== pref) return false; genPct = p; renderCards(); };
   genPct = 0;
-  const job = state.dest ? OrcaLoop.makeRoutes(graph(), s, state.dest.node, D*1000, tick) : OrcaLoop.makeLoops(graph(), s, D*1000, tick);
+  const job = state.dest ? OrcaLoop.makeRoutes(graph(), s, state.dest.node, D*1000, tick, pref) : OrcaLoop.makeLoops(graph(), s, D*1000, tick, pref);
   const g = job.then(out => {
     if (gen === g) gen = null;
     if (!out) return ensureRoutes(); // 멈춘 생성: 지금 조건으로 다시
-    TERR_OPTS.forEach(([t]) => R[key + t] = out[t] || []);
+    Object.keys(out).forEach(t => { if (t !== 'direct') R[key + t] = out[t]; });
     if (out.direct) DIRECT[key] = out.direct;
     renderAll(true);
   });
-  g.key = key; return gen = g;
+  g.key = key + pref; return gen = g;
 }
 const DIRECT = {}; // 목적지 코스: 출발지→목적지 최단 거리(m)
 // 설정 거리보다 출발지~목적지가 멀면 늘릴 수 없으니, 그 사실을 알리고 가장 짧은 최적 코스로 안내한다
@@ -601,7 +602,12 @@ function resize(){
   cv.width = Math.round(r.width*dpr); cv.height = Math.round(r.height*dpr);
   draw();
 }
-function toScreen(x, y){ return [(x-view.cx)*view.s + cv.width/dpr/2, -(y-view.cy)*view.s + cv.height/dpr/2]; }
+let F = null; // 이번 그리기의 화면 변환(미터 평면 → 화면)
+function frame(){
+  return {x0:view.cx, y0:view.cy, px:cv.width/dpr/2, py:cv.height/dpr/2, ax:view.s, ay:0, bx:0, by:-view.s, s:view.s};
+}
+function toScreen(x, y){ const f = F || frame(); return [f.px + (x - f.x0)*f.ax + (y - f.y0)*f.bx, f.py + (x - f.x0)*f.ay + (y - f.y0)*f.by]; }
+
 function ring(x, y, r, w, stroke){
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2);
   ctx.fillStyle = css('--ground'); ctx.fill();
@@ -643,10 +649,12 @@ function drawTiles(W, H, s){
   }
 }
 function draw(){
-  const W = cv.width/dpr, H = cv.height/dpr, s = view.s;
+  const W = cv.width/dpr, H = cv.height/dpr;
+  F = frame(); const s = F.s;
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.fillStyle = css('--ground'); ctx.fillRect(0,0,W,H);
-  ctx.setTransform(dpr*s,0,0,dpr*s, dpr*(W/2 - view.cx*s), dpr*(H/2 + view.cy*s));
+  // 그림 좌표는 (x, -y): 화면 = p0 + (x-x0)·a + (y-y0)·b
+  ctx.setTransform(dpr*F.ax, dpr*F.ay, -dpr*F.bx, -dpr*F.by, dpr*(F.px - F.x0*F.ax - F.y0*F.bx), dpr*(F.py - F.x0*F.ay - F.y0*F.by));
   ctx.fillStyle = css('--map-park'); ctx.fill(paths.park);
   ctx.fillStyle = css('--map-wood'); ctx.fill(paths.wood);
   ctx.fillStyle = css('--map-water'); ctx.fill(paths.water);
@@ -854,7 +862,7 @@ function renderCards(){
     b.innerHTML =
       '<span class="badge">' + NAMES[i] + '</span>' +
       '<span><b>' + NAMES[i] + '선 · ' + courseName() + '</b>' +
-      '<small>' + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · 상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small></span>' +
+      '<small>' + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · ' + (r.trail > 0.02 ? '산길 ' + Math.round(r.trail*100) + '% · ' : '') + '상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small></span>' +
       '<span class="km">' + (r.dist/1000).toFixed(2) + '<em>km</em></span>';
     b.addEventListener('click', () => { state.sel = i; state.focus = -1; renderAll(false); });
     el.appendChild(b);

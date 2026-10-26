@@ -13,7 +13,7 @@
       const e = {id: k / 3, L, w: L * (f & 4 ? 1.25 : 1) * (f & 2 ? 4 : 1) * (f & 8 ? 0.9 : 1), f};
       adj[a].push(b, e); adj[b].push(a, e);
     }
-    return {G, n, adj};
+    return {G, n, adj, trailMul: 1};
   }
 
   function near(P, x, y) {
@@ -35,7 +35,7 @@
       if (d > dist[u]) continue;
       const a = P.adj[u];
       for (let k = 0; k < a.length; k += 2) {
-        const v = a[k], e = a[k + 1], nd = d + e.w * (pen.has(e.id) ? 4 : 1);
+        const v = a[k], e = a[k + 1], nd = d + e.w * (pen.has(e.id) ? 4 : 1) * (e.f & 1 ? P.trailMul : 1);
         if (nd < dist[v]) { dist[v] = nd; prev[v] = u; pe[v] = e; push(nd, v); }
       }
     }
@@ -81,23 +81,30 @@
   }
 
   // 한 거리에 대해 후보를 만들고 지형별로 3개씩 고른다. tick(진행률)으로 화면이 멈추지 않게 쉬어 간다
-  async function makeLoops(P, s, D, tick) {
+  // pref: 'road'(평지·완만·언덕 — 산길을 5배 비싸게 쳐 피함) | 'trail'(산길을 싸게 쳐 찾음)
+  const TRAIL_MUL = {road: 5, trail: 0.7};
+  // 평지·완만은 산길이 5% 넘게 섞인 후보를 아예 뺀다(경로 비용으로 피했어도 남는 경우 마지막 확인)
+  const ALLOW = {flat: c => c.trail <= 0.05, mild: c => c.trail <= 0.05, hill: () => true, trail: () => true};
+  const TERRS = {road: ['flat', 'mild', 'hill'], trail: ['trail']};
+  async function makeLoops(P, s, D, tick, pref = 'road') {
+    P.trailMul = TRAIL_MUL[pref];
     const cands = [];
     for (let i = 0; i < 16; i++) {
       const th = i * Math.PI / 8;
       for (const spread of [0.5, 0.8]) {
         let R = D / ((2 + 2*Math.sin(spread)) * 1.3), c = null;
-        for (let it = 0; it < 3; it++) { c = loopOnce(P, s, th, R, spread); if (!c || Math.abs(c.L - D) / D < 0.08) break; R *= D / c.L; }
-        if (c && Math.abs(c.L - D) / D < 0.12 && c.rep <= 0.25) cands.push(finish(P, c));
+        for (let it = 0; it < 3; it++) { c = loopOnce(P, s, th, R, spread); if (!c || Math.abs(c.L - D) < Math.max(0.08*D, 100)) break; R *= D / c.L; }
+        if (c && Math.abs(c.L - D) < Math.max(0.12*D, 150) && c.rep <= (D < 1500 ? 0.4 : 0.25)) cands.push(finish(P, c)); // 짧은 코스는 오차·되돌아오는 길을 조금 더 허용
       }
-      if (tick) { if (tick((i + 1) / 16) === false) return null; await new Promise(r => setTimeout(r)); }
+      if (tick) { if (tick((i + 1) / 16) === false){ P.trailMul = 1; return null; } await new Promise(r => setTimeout(r)); }
     }
+    P.trailMul = 1;
     const score = {flat: c => c.apk + c.rep*20 + c.steps*3, mild: c => Math.abs(c.apk - 12) + c.rep*20 + c.steps*3,
                    hill: c => -c.apk + c.rep*20, trail: c => -c.trail*40 + c.rep*20};
     const out = {};
-    for (const t in score) {
+    for (const t of TERRS[pref]) {
       const pick = [];
-      for (const c of cands.slice().sort((a, b) => score[t](a) - score[t](b))) {
+      for (const c of cands.filter(ALLOW[t]).slice().sort((a, b) => score[t](a) - score[t](b))) {
         if (pick.every(q => Math.abs(((c.th - q.th + 3*Math.PI) % (2*Math.PI)) - Math.PI) > 0.6)) pick.push(c);
         if (pick.length === 3) break;
       }
@@ -108,7 +115,8 @@
 
   // 출발지 → 목적지 코스. 가장 짧은 길, 그와 다른 길(지난 길 1.6배 비용), 원하는 거리가 더 길면
   // 경유점으로 늘린 길을 후보로 만들고 지형별로 3개씩 고른다. 구조는 makeLoops와 같다.
-  async function makeRoutes(P, s, t, D, tick) {
+  async function makeRoutes(P, s, t, D, tick, pref = 'road') {
+    P.trailMul = TRAIL_MUL[pref];
     const direct = sp(P, s, t, new Set());
     if (!direct) return {flat: [], mild: [], hill: [], trail: []};
     const Ld = direct.es.reduce((a, e) => a + e.L, 0), T = Math.max(D, Ld), raw = [];
@@ -135,7 +143,7 @@
           off *= Math.max(0.3, Math.min(3, 1 + (T - L) / Math.max(L - Ld, 200)));
         }
         if (best && Math.abs(best.L - T) / T < 0.15) add(best.path, best.es, th);
-        if (tick) { if (tick((i + 1) / 12) === false) return null; await new Promise(r => setTimeout(r)); }
+        if (tick) { if (tick((i + 1) / 12) === false){ P.trailMul = 1; return null; } await new Promise(r => setTimeout(r)); }
       }
     }
     const cands = raw.map(c => {
@@ -143,12 +151,13 @@
       for (const e of c.es) { L += e.L; if (seen.has(e.id)) rep += e.L; seen.add(e.id); if (e.f & 1) trail += e.L; if (e.f & 2) steps++; }
       const r = finish(P, {path: c.path, L, rep: rep / L, trail: trail / L, steps, th: c.th}); r.fit = Math.abs(L - T) / T; return r;
     }).filter(c => c.rep <= 0.25);
+    P.trailMul = 1;
     const score = {flat: c => c.apk + c.fit*40 + c.steps*3, mild: c => Math.abs(c.apk - 12) + c.fit*40 + c.steps*3,
                    hill: c => -c.apk + c.fit*40, trail: c => -c.trail*40 + c.fit*40};
     const out = {};
-    for (const k in score) {
+    for (const k of TERRS[pref]) {
       const pick = [];
-      for (const c of cands.slice().sort((a, b) => score[k](a) - score[k](b))) {
+      for (const c of cands.filter(ALLOW[k]).slice().sort((a, b) => score[k](a) - score[k](b))) {
         if (pick.every(q => Math.abs(q.dist - c.dist) > 60 || Math.abs(q.asc - c.asc) > 3)) pick.push(c); // 같은 길 중복 제외
         if (pick.length === 3) break;
       }
@@ -167,6 +176,7 @@
   // 달리다 코스를 벗어났을 때: 지금 위치에서 앞쪽 남은 코스(100m~1km) 중 가장 덜 돌아가는 지점으로 붙는 길을 찾고,
   // 그 뒤는 원래 코스를 그대로 잇는다. 앞쪽만 보므로 출발점으로 돌아오는 순환은 유지된다.
   function rejoin(P, r, prog, x, y) {
+    P.trailMul = r.trail > 0.25 ? TRAIL_MUL.trail : TRAIL_MUL.road;
     const n = r.pts.length / 2, [s] = near(P, x, y);
     let best = null;
     for (let i = Math.min(n - 1, prog + 4); i <= Math.min(n - 1, prog + 40); i += 4) {
@@ -175,6 +185,7 @@
       const L = p.es.reduce((a, e) => a + e.L, 0), cost = L - (i - prog) * STEP; // 원래 코스보다 더 뛰는 거리
       if (!best || cost < best.cost) best = {i, p, L, cost};
     }
+    P.trailMul = 1;
     if (!best) return null;
     const d = finish(P, {path: best.p.path, L: best.L || 1, rep: 0, trail: 0, steps: 0, th: 0});
     return Object.assign({}, r, {pts: d.pts.concat(r.pts.slice(2 * best.i)), el: d.el.concat(r.el.slice(best.i)),

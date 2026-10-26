@@ -1,3 +1,4 @@
 .env
 data/dem/
 docs/
+tools/elev_cache.json

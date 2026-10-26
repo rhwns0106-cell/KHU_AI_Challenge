@@ -20,6 +20,11 @@ const {prep, near, makeLoops} = globalThis.OrcaLoop;
     }
   }
   assert.ok(out.flat.length >= 1);
+  // 평지·완만 추천에는 산길이 5% 넘게 섞이면 안 된다
+  for (const t of ['flat', 'mild']) for (const r of out[t]) assert.ok(r.trail <= 0.05, t + ' 코스에 산길 ' + r.trail);
+  // 산길을 고르면 산길 위주 후보를 따로 만든다
+  const tr = await makeLoops(P, s, 5000, null, 'trail');
+  console.log('산길 요청: 산길 비율', tr.trail.map(r => r.trail));
 
   // 코스 이탈 → 다시 붙기: 1km 지점(40번째 점)에서 옆으로 80m 벗어난 곳
   const r = out.flat[0], n = r.pts.length / 2, k = 40;
@@ -38,7 +43,7 @@ const {prep, near, makeLoops} = globalThis.OrcaLoop;
     const o = await globalThis.OrcaLoop.makeRoutes(P, a, b, D);
     console.log('목적지', D, o.flat.map(r => r.dist));
     assert.ok(o.flat.length >= 1, '목적지 코스가 있어야 함');
-    for (const t of ['flat', 'mild', 'hill', 'trail']) for (const r of o[t]){
+    for (const t of ['flat', 'mild', 'hill']) for (const r of o[t]){
       const m = r.pts.length / 2;
       assert.deepEqual([r.pts[0], r.pts[1]], [P.G.nodes[2*a], P.G.nodes[2*a+1]], '출발지에서 시작');
       assert.deepEqual([r.pts[2*m-2], r.pts[2*m-1]], [P.G.nodes[2*b], P.G.nodes[2*b+1]], '목적지에서 끝');
