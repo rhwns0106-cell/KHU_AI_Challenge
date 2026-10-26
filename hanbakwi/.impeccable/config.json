@@ -83,6 +83,15 @@
         ],
         "createdAt": "2026-10-25T12:31:33.205Z",
         "reason": "Claude: throwaway decision-page sketch drawn as a skeleton; never shipped"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "index.html"
+        ],
+        "createdAt": "2026-10-26T05:27:46.134Z",
+        "reason": "Claude: only hit is the refine input placeholder using the design's --faint token (#7e88a8 on #111a3d, ~4.7:1, meets AA), same treatment as the main ask input"
       }
     ]
   }

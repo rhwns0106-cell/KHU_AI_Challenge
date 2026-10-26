@@ -312,6 +312,8 @@ function parseAsk(text){
   else if (/서천|생태공원/.test(t)) out.start = 'seocheon';
   else if (/정문|학교|캠퍼스|경희/.test(t)) out.start = 'gate';
   if (/여기서|내 위치|현재 위치|지금 위치/.test(t)){ out.here = true; delete out.start; }
+  if (/새로운|새 코스|다른 코스|안 뛰어|처음 가/.test(t)) out.novel = true;
+  if (/같은 거리|같은 시간|지난번|저번|어제랑/.test(t)) out.repeat_last = true;
   return out;
 }
 function nearestDist(km){ return DIST_OPTS.map(d=>d[0]).reduce((a,b)=>Math.abs(b-km)<Math.abs(a-km)?b:a); }
@@ -326,12 +328,58 @@ async function ai(task, payload){
 let askSeq = 0;
 async function applyAsk(){
   const text = document.getElementById('q').value, seq = ++askSeq;
-  applyParsed(parseAsk(text), 'rule');
+  const rule = parseAsk(text);
+  applyParsed(rule, 'rule');
   const a = await ai('parse', {text});
-  if (!a || seq !== askSeq) return;
-  const km = a.km || (a.minutes ? a.minutes / PACE : null);
-  applyParsed({start:a.start || undefined, km:km || undefined, min:a.minutes || undefined, terr:a.terrain || undefined}, 'ai');
-  if (a.here) useMyLocation(); else if (a.place) findPlace(a.place);
+  if (seq !== askSeq) return;
+  const it = a || rule;
+  if (a){
+    const km = a.km || (a.minutes ? a.minutes / PACE : null);
+    applyParsed({start:a.start || undefined, km:km || undefined, min:a.minutes || undefined, terr:a.terrain || undefined}, 'ai',
+                [it.repeat_last && '지난번과 같은 거리', it.novel && '안 뛰어본 코스'].filter(Boolean));
+  }
+  if (it.repeat_last) await useLastRun(!!(a && (a.km || a.minutes)));
+  if (it.here) useMyLocation(); else if (it.place) await findPlace(it.place);
+  if (it.novel) await pickNovel(a && a.terrain);
+}
+
+/* ---------- 지난 기록: 서버(연결돼 있으면) + 이 기기 ---------- */
+const DEVICE = (() => { try { let v = localStorage.getItem('orca.device'); if (!v){ v = crypto.randomUUID(); localStorage.setItem('orca.device', v); } return v; } catch(e){ return crypto.randomUUID(); } })();
+let history = [], serverOK = false;
+function localRuns(){ try { return JSON.parse(localStorage.getItem('hanbakwi.runs') || '[]'); } catch(e){ return []; } }
+async function loadHistory(){
+  history = localRuns();
+  try { const r = await fetch('/api/runs?id=' + DEVICE); if (r.ok){ serverOK = true; const sr = (await r.json()).runs; if (sr.length) history = sr; } } catch(e){}
+  renderLog();
+}
+// 코스를 50m 칸 집합으로 줄여 저장·비교한다(GPS 궤적 원본은 저장하지 않음)
+function cells(r){ const c = new Set(); for (let i = 0; i < r.pts.length; i += 4) c.add((Math.round(r.pts[i]/50) + 500)*1000 + Math.round(r.pts[i+1]/50) + 500); return [...c]; }
+function overlap(r){
+  const seen = new Set(); history.slice(0, 10).forEach(h => (h.cells || []).forEach(c => seen.add(c)));
+  if (!seen.size) return 0;
+  const c = cells(r); return c.filter(x => seen.has(x)).length / c.length;
+}
+// 지난번과 같은 출발지·거리로 맞춘다(말에 거리·시간이 따로 있으면 그걸 우선)
+async function useLastRun(keepDist){
+  const h = history.find(x => x.dist && x.start);
+  if (!h){ startMsg('아직 저장된 기록이 없어요. 한 번 달리고 나면 지난번 기준으로 추천할 수 있어요.'); return; }
+  if (!keepDist) state.dist = h.dist;
+  if (h.start === 'custom') setCustom(h.startName || '지난 출발지', h.sx, h.sy);
+  else { Object.assign(state, {start:h.start, sel:0, focus:-1}); renderAll(true); }
+}
+// 지금 출발지·거리·지형 후보 중 지난 기록과 가장 덜 겹치는 코스를 고른다.
+// 그 지형 안에서 모두 절반 넘게 겹칠 때만 다른 지형까지 넓힌다(평지 찾던 사람에게 갑자기 산길을 주지 않게)
+async function pickNovel(terr){
+  await ensureRoutes();
+  const bestIn = ts => { let b = null; ts.forEach(t => (R[state.start+'|'+state.dist+'|'+t] || []).forEach((r, i) => {
+    const o = overlap(r); if (!b || o < b.o) b = {t, i, o}; })); return b; };
+  let best = bestIn([terr || state.terr]);
+  if (!terr && (!best || best.o > 0.5)){ const wide = bestIn(TERR_OPTS.map(o => o[0])); if (wide && (!best || wide.o < best.o)) best = wide; }
+  if (!best) return;
+  Object.assign(state, {terr:best.t, sel:best.i, focus:-1}); renderAll(true);
+  startMsg(history.some(h => h.cells && h.cells.length)
+    ? '지난 기록과 겹치는 길이 ' + Math.round(best.o*100) + '%로 가장 적은 코스를 골랐어요.'
+    : '비교할 지난 코스 기록이 아직 없어서 첫 추천을 보여드려요.');
 }
 
 /* ---------- 내가 정한 출발지: 내 위치 · 장소 검색 · 지도에서 찍기 ---------- */
@@ -374,15 +422,16 @@ async function findPlace(name){
 }
 // 내가 정한 출발지는 코스를 미리 만들어 두지 않았으니, 거리가 바뀔 때마다 그 자리에서 만든다
 function ensureRoutes(){
-  if (state.start !== 'custom' || R['custom|'+state.dist+'|flat'] || gen) return;
-  const D = state.dist, st = B.starts.find(s => s.id === 'custom'); gen = D; genPct = 0;
-  OrcaLoop.makeLoops(graph(), st.node, D*1000, p => { genPct = p; renderCards(); }).then(out => {
+  if (state.start !== 'custom' || R['custom|'+state.dist+'|flat']) return Promise.resolve();
+  if (gen) return gen;
+  const D = state.dist, st = B.starts.find(s => s.id === 'custom'); genPct = 0;
+  return gen = OrcaLoop.makeLoops(graph(), st.node, D*1000, p => { genPct = p; renderCards(); }).then(out => {
     for (const t in out) R['custom|'+D+'|'+t] = out[t];
     gen = null; renderAll(true);
   });
 }
-function applyParsed(p, source){
-  const chips = [];
+function applyParsed(p, source, extra = []){
+  const chips = [...extra];
   state.budget = p.min || null;
   if (p.start){ state.start = p.start; chips.push(START_OPTS.find(s=>s[0]===p.start)[1] + ' 출발'); }
   if (p.km){ state.dist = nearestDist(p.km); chips.push((p.min ? p.min + '분 · ' : '') + state.dist + 'km 코스'); }
@@ -908,7 +957,9 @@ const ACT = {
     if (!r){ status('먼저 코스를 골라 주세요.'); return; }
     Object.assign(run, {route:r, prog:0, pos:null, heading:null, segs:[[]], dist:0, activeMs:0, restMs:0, stopMs:0, stops:0, auto:false, lastMoveT:0,
                         splits:[], recent:[], follow:true, off:0, lastTurn:null, lastOff:false, arrived:false,
-                        label:NAMES[state.sel] + '선 · ' + startName() + ' ' + (r.dist/1000).toFixed(1) + 'km'});
+                        label:NAMES[state.sel] + '선 · ' + startName() + ' ' + (r.dist/1000).toFixed(1) + 'km',
+                        meta:{start:state.start, startName:startName(), sx:B.starts.find(x => x.id === state.start).x, sy:B.starts.find(x => x.id === state.start).y,
+                              dist:state.dist, terr:state.terr, cells:cells(r)}});
     run.mode = 'running';
     if (!startTracking(sim === true)){ run.mode = 'idle'; renderRun(); return; }
     run.since = now(); keepAwake(); renderRun();
@@ -923,11 +974,14 @@ const ACT = {
     run.auto = false;
     stopTracking();
     const rec = {at:new Date().toLocaleString('ko-KR', {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'}), label:run.label,
-                 km:run.dist/1000, ms:run.activeMs, rest:run.restMs + run.stopMs, stops:run.stops, sim:!!run.sim};
-    let log = [];
-    try { log = JSON.parse(localStorage.getItem('hanbakwi.runs') || '[]'); } catch(e){}
-    log.unshift(rec); log = log.slice(0, 20);
-    try { localStorage.setItem('hanbakwi.runs', JSON.stringify(log)); } catch(e){}
+                 km:run.dist/1000, ms:run.activeMs, rest:run.restMs + run.stopMs, stops:run.stops, sim:!!run.sim, ...run.meta};
+    if (rec.km >= 0.3){ // 거의 안 달린 기록은 '뛴 코스'로 치지 않는다
+      history.unshift(rec);
+      const log = [rec, ...localRuns()].slice(0, 20);
+      try { localStorage.setItem('hanbakwi.runs', JSON.stringify(log)); } catch(e){}
+      fetch('/api/runs', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:DEVICE, run:rec})})
+        .then(r => { serverOK = r.ok; renderLog(); }).catch(() => {});
+    }
     run.mode = 'idle'; run.sim = null;
     status(rec.km > 0.05 ? '기록을 저장했어요: ' + rec.km.toFixed(2) + 'km, ' + fmtClock(rec.ms) + ', 평균 ' + fmtPace(rec.ms/1000/rec.km) + '/km' : '이동 거리가 거의 없어서 페이스는 계산하지 않았어요.');
     renderRun(); renderLog(); draw();
@@ -963,9 +1017,8 @@ function askFeel(rec){
   });
 }
 function renderLog(){
-  let log = [];
-  try { log = JSON.parse(localStorage.getItem('hanbakwi.runs') || '[]'); } catch(e){}
-  document.getElementById('runlog').innerHTML = log.slice(0, 5).map(r =>
+  const log = history;
+  document.getElementById('runlog').innerHTML = (log.length ? '<li>' + (serverOK ? '기록은 서버에 저장돼요.' : '기록은 이 기기에만 저장돼요.') + '</li>' : '') + log.slice(0, 5).map(r =>
     '<li>' + r.at + ' · ' + r.label + (r.sim ? ' (시뮬레이션)' : '') + ' — <b>' + r.km.toFixed(2) + 'km</b> · <b>' + fmtClock(r.ms) + '</b> · 휴식·정지 ' + fmtClock(r.rest) + (r.stops ? '(' + r.stops + '회)' : '') +
     (r.km > 0.05 ? ' · 평균 <b>' + fmtPace(r.ms/1000/r.km) + '</b>' : '') + '</li>').join('');
 }
@@ -990,7 +1043,7 @@ function renderAll(refit){
 }
 new ResizeObserver(() => { resize(); renderProfile(); }).observe(box);
 document.fonts && document.fonts.ready.then(() => draw());
-resize(); applyAsk(); renderRun(); renderLog();
+resize(); applyAsk(); renderRun(); loadHistory();
 })();
 </script>
 </body>
