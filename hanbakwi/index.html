@@ -273,7 +273,6 @@ canvas.drag{cursor:grabbing}
 </div>
 
 <script src="data.js"></script>
-<script src="signals.js"></script>
 <script src="graph.js"></script>
 <script src="loop.js"></script>
 <script>
@@ -567,7 +566,7 @@ function directed(r, rev){
   if (c[rev]) return c[rev];
   const n = r.el.length, pts = [], el = rev ? r.el.slice().reverse() : r.el;
   if (rev) for (let i = n-1; i >= 0; i--) pts.push(r.pts[2*i], r.pts[2*i+1]);
-  const o = Object.assign({}, r, {pts: rev ? pts : r.pts, el, rev:!!rev});
+  const o = Object.assign({}, r, {pts: rev ? pts : r.pts, el, rev:!!rev, sigAt: rev ? (r.sigAt || []).map(i => n - 1 - i).reverse() : r.sigAt});
   const g = grades(o), cnt = [0,0,0,0,0]; g.forEach(v => cnt[gradeClass(v)]++);
   let asc = 0; for (let i = 1; i < n; i++) asc += Math.max(0, el[i] - el[i-1]);
   return c[rev] = Object.assign(o, {share:cnt.map(k => k/n), asc:Math.round(asc), maxg:Math.max(0, ...g)});
@@ -803,21 +802,19 @@ function stations(r){
   out.push({i:n-1, label:endName(), term:true});
   return out;
 }
-const SIG = window.ORCA_SIGNALS || [];
 const etaCache = new WeakMap();
 // 예상 시간 = 거리×페이스 + 오르막(상승 10m당 14초: 경사 1%마다 약 3.5% 느려진다는 근사, 6'30" 기준)
 //           + 신호(교차로당 기대 대기 20초: 절반은 초록불, 빨간불이면 평균 40초로 가정)
 function eta(r){
   if (etaCache.has(r)) return etaCache.get(r);
-  let sig = 0;
-  for (let j = 0; j < SIG.length; j += 2)
-    for (let i = 0; i < r.pts.length; i += 2)
-      if (Math.abs(r.pts[i]-SIG[j]) < 20 && Math.abs(r.pts[i+1]-SIG[j+1]) < 20){ sig++; break; }
-  const base = r.dist/1000*PACE*60, climb = r.asc*1.4, wait = sig*20;
-  const o = {min:Math.round((base+climb+wait)/60), sig, climbMin:Math.round(climb/60), waitMin:Math.round(wait/60)};
+  const sig = r.sig || 0, base = r.dist/1000*PACE*60, climb = r.asc*1.4, wait = sig*20;
+  const o = {min:Math.round((base+climb+wait)/60), sig, climbMin:Math.round(climb/60), waitS:wait};
   etaCache.set(r, o); return o;
 }
-function etaNote(e){ return (e.sig ? '신호 ' + e.sig + '곳(대기 약 ' + Math.max(1, e.waitMin) + '분)' : '신호 없음') + (e.climbMin ? ' · 오르막 +' + e.climbMin + '분' : ''); }
+function etaNote(e){
+  const w = e.waitS < 60 ? e.waitS + '초' : Math.round(e.waitS/60) + '분';
+  return (e.sig ? '신호 건널목 ' + e.sig + '곳(대기 약 ' + w + ')' : '신호 건널목 없음') + (e.climbMin ? ' · 오르막 +' + e.climbMin + '분' : '');
+}
 function renderStrip(){
   const r = current()[state.sel], line = document.getElementById('line');
   document.getElementById('strip-title').textContent = r ? NAMES[state.sel] + '선 · ' + courseName() + (state.rev ? ' (반대 방향)' : '') : '코스 없음';
@@ -863,7 +860,7 @@ function renderCards(){
     b.innerHTML =
       '<span class="badge">' + NAMES[i] + '</span>' +
       '<span><b>' + NAMES[i] + '선 · ' + courseName() + '</b>' +
-      '<small>' + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · ' + (r.trail > 0.02 ? '산길 ' + Math.round(r.trail*100) + '% · ' : '') + '상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small></span>' +
+      '<small>' + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · ' + (r.trail > 0.02 ? '산길 ' + Math.round(r.trail*100) + '% · ' : '') + (r.road > 0.1 ? '골목 차도 ' + Math.round(r.road*100) + '% · ' : '') + '상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small></span>' +
       '<span class="km">' + (r.dist/1000).toFixed(2) + '<em>km</em></span>';
     b.addEventListener('click', () => { state.sel = i; state.focus = -1; renderAll(false); });
     el.appendChild(b);
@@ -915,7 +912,7 @@ function renderBrief(){
   ai('brief', {route:{start:startName(), destination:state.dest ? endName() : '출발지로 돌아오는 순환', dist_km:+(r.dist/1000).toFixed(2), minutes:eta(r).min, signals:eta(r).sig, ascent_m:r.asc, max_grade_pct:Math.round(r.maxg),
       share_pct:{flat:flatPct, mild:Math.round(r.share[1]*100), up:Math.round(r.share[2]*100), steep:Math.round(r.share[3]*100), down:Math.round(r.share[4]*100)}, direction:state.rev ? '반대 방향' : '기본 방향',
       longest_climb: best ? {at_km:+(best.s*STEP/1000).toFixed(1), length_m:Math.round(best.len/10)*10, rise_m:Math.round(best.rise)} : null,
-      trail_pct:Math.round(r.trail*100), steps:r.steps, time_budget_min:state.budget}})
+      trail_pct:Math.round(r.trail*100), road_without_sidewalk_pct:Math.round((r.road || 0)*100), steps:r.steps, time_budget_min:state.budget}})
     .then(ls => {
       if (!Array.isArray(ls) || !ls.length){ if (key === rkey()+'|'+state.sel+'|'+state.rev) note.textContent = 'ChatKHU에 연결하지 못해 규칙으로 만든 문장을 보여드려요.'; return; }
       briefCache[key] = ls;
@@ -986,7 +983,9 @@ function guideText(){
     const [c0, c1] = [rp(run.prog+k), rp(run.prog+k+2)], diff = angDiff(b1, bearing(c1[0]-c0[0], c1[1]-c0[1]));
     if (Math.abs(diff) > 40){ turn = '약 ' + k*STEP + 'm 앞에서 ' + (diff > 0 ? '오른쪽' : '왼쪽') + '으로 꺾어요'; turnAt = Math.round((run.prog+k)/4); turnDist = k*STEP; break; }
   }
-  return {main: turn || '이 방향으로 계속 가세요', sub:'남은 거리 ' + (left/1000).toFixed(2) + 'km', target:rp(run.prog+3), turnAt, turnDist};
+  const sg = (run.route.sigAt || []).find(i => i >= run.prog && (i - run.prog)*STEP <= 100);
+  const sigNote = sg != null ? ' · ' + Math.max(10, (sg - run.prog)*STEP) + 'm 앞 신호 건널목' : '';
+  return {main: turn || '이 방향으로 계속 가세요', sub:'남은 거리 ' + (left/1000).toFixed(2) + 'km' + sigNote, target:rp(run.prog+3), turnAt, turnDist, sigAhead:sg, sigDist:sg != null ? (sg - run.prog)*STEP : null};
 }
 
 function renderRun(){
@@ -1017,6 +1016,7 @@ function renderRun(){
   if (run.mode === 'running' && !run.auto){
     if (gt.turnAt != null && gt.turnDist <= 75 && run.lastTurn !== gt.turnAt){ run.lastTurn = gt.turnAt; speak(gt.main); }
     if (gt.off && !run.lastOff) speak('코스에서 벗어났어요. 화살표 방향으로 돌아가세요.');
+    if (gt.sigAhead != null && gt.sigDist <= 60 && run.lastSig !== gt.sigAhead){ run.lastSig = gt.sigAhead; speak('곧 신호 건널목이에요. 신호를 기다리는 동안은 기록이 멈춰요.'); }
     if (gt.arrived && !run.arrived){ run.arrived = true; speak('도착했어요. 종료를 눌러 기록을 저장하세요.'); }
     run.lastOff = !!gt.off;
   }
@@ -1055,7 +1055,7 @@ function status(msg){ document.getElementById('runstatus').textContent = msg; }
 function reroute(){
   const nr = OrcaLoop.rejoin(graph(), run.route, run.prog, run.pos.x, run.pos.y);
   if (!nr) return;
-  Object.assign(run, {route:nr, prog:0, off:0, offSince:0, rerouteAt:now(), reroutes:run.reroutes + 1, lastTurn:null, simI:0});
+  Object.assign(run, {route:nr, prog:0, off:0, offSince:0, rerouteAt:now(), reroutes:run.reroutes + 1, lastTurn:null, lastSig:null, simI:0});
   speak('코스를 다시 잡았어요. 화살표 방향으로 가세요.');
   status('코스를 벗어나서, 지금 위치에서 원래 코스로 돌아가는 길을 다시 찾았어요. 남은 거리 ' + (nr.dist/1000).toFixed(2) + 'km');
   draw();

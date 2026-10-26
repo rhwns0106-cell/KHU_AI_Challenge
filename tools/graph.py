@@ -25,6 +25,8 @@ def overpass(q):
 ways = overpass(f'[out:json][timeout:180];way[highway]({S},{W},{N},{E});out geom;')
 forest_els = overpass(f'[out:json][timeout:180];(way[natural~"^(wood|scrub)$"]({S},{W},{N},{E});way[landuse=forest]({S},{W},{N},{E});'
                       f'relation[natural~"^(wood|scrub)$"]({S},{W},{N},{E});relation[landuse=forest]({S},{W},{N},{E}););out geom;')
+# 신호등 노드(차량 신호·신호 있는 건널목): 코스가 이 노드를 지나는 간선에 표시한다
+sig_nodes = {e['id'] for e in overpass(f'[out:json][timeout:120];(node[highway=traffic_signals]({S},{W},{N},{E});node[crossing=traffic_signals]({S},{W},{N},{E});node["crossing:signals"=yes]({S},{W},{N},{E}););out ids;')}
 rings = []
 for e in forest_els:
     geoms = [e['geometry']] if e['type'] == 'way' and e.get('geometry') else [m['geometry'] for m in e.get('members', []) if m.get('role') == 'outer' and m.get('geometry')]
@@ -49,6 +51,7 @@ MAJOR = {'primary', 'primary_link', 'secondary', 'secondary_link'}
 SOFT = {'footway', 'cycleway', 'pedestrian'}  # 포장 보행로로 보는 길(산길로 판정되면 제외)
 UNPAVED = {'ground', 'earth', 'dirt', 'gravel', 'fine_gravel', 'grass', 'unpaved', 'sand', 'mud', 'woodchips', 'compacted', 'pebblestone', 'rock'}
 PAVED = {'asphalt', 'concrete', 'paving_stones', 'sett', 'paved', 'concrete:plates'}
+CAR = {'primary', 'primary_link', 'secondary', 'secondary_link', 'tertiary', 'tertiary_link', 'unclassified', 'residential', 'service', 'living_street', 'road'}
 
 idx, nodes, edges, adj = {}, [], {}, {}
 def nid(osm, la, lo):
@@ -65,13 +68,21 @@ for w in ways:
     # 산길: 오솔길(path·track), 흙·자갈 노면, 또는 숲·덤불 안을 지나는 비포장 보행로
     trail = h in ('path', 'track') or surf in UNPAVED or (h in ('footway', 'steps', 'pedestrian', 'cycleway') and surf not in PAVED and in_forest(*mid))
     n_trail += trail
-    flag = (1 if trail else 0) | (2 if h == 'steps' else 0) | (4 if h in MAJOR else 0) | (8 if h in SOFT and not trail else 0)
+    # 인도 구분: 16 차도, 32 차도에 인도가 붙어 있음(sidewalk=both/left/right/yes), 64 인도가 따로 그려져 있거나 없음(separate/no → 차도 자체는 피함)
+    sw = ' '.join(str(t.get(k, '')) for k in ('sidewalk', 'sidewalk:both', 'sidewalk:left', 'sidewalk:right'))
+    car = h in CAR
+    flag = (1 if trail else 0) | (2 if h == 'steps' else 0) | (4 if h in MAJOR else 0) | (8 if h in SOFT and not trail else 0)          | (16 if car else 0) | (32 if car and any(v in sw for v in ('both', 'left', 'right', 'yes')) else 0)          | (64 if car and any(v in sw for v in ('separate', 'no', 'none')) and not any(v in sw for v in ('both', 'yes')) else 0)
+    flag |= 256 if h in ('residential', 'service', 'unclassified', 'living_street', 'road') else 0  # 골목·단지 도로: 인도가 없는 경우가 많다
+    sig_way = t.get('crossing') == 'traffic_signals' or t.get('crossing:signals') == 'yes'  # 신호 있는 건널목 길
     for k in range(len(g) - 1):
         a, b = nid(w['nodes'][k], g[k]['lat'], g[k]['lon']), nid(w['nodes'][k + 1], g[k + 1]['lat'], g[k + 1]['lon'])
         if a == b: continue
-        edges[(min(a, b), max(a, b))] = flag
+        # 128: 신호(이 간선 끝이 신호 노드이거나 신호 건널목 길)
+        edges[(min(a, b), max(a, b))] = flag | (128 if sig_way or w['nodes'][k] in sig_nodes or w['nodes'][k + 1] in sig_nodes else 0)
         adj.setdefault(a, set()).add(b); adj.setdefault(b, set()).add(a)
-print('ways', len(ways), 'forest rings', len(rings), 'trail ways', n_trail)
+print('ways', len(ways), 'forest rings', len(rings), 'trail ways', n_trail,
+      'sidewalk tagged', sum(1 for w in ways if 'sidewalk' in ' '.join(w.get('tags', {}))),
+      'footway=sidewalk', sum(1 for w in ways if w.get('tags', {}).get('footway') == 'sidewalk'), 'signal nodes', len(sig_nodes))
 
 # 가장 큰 연결 덩어리만 남긴다
 seen, best = set(), []

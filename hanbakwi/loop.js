@@ -10,7 +10,10 @@
       const a = G.edges[k], b = G.edges[k + 1], f = G.edges[k + 2];
       const L = Math.hypot(G.nodes[2*a] - G.nodes[2*b], G.nodes[2*a+1] - G.nodes[2*b+1]);
       // 큰길 1.25배, 계단 4배, 보행로 0.9배로 걷기 좋은 길을 고른다
-      const e = {id: k / 3, L, w: L * (f & 4 ? 1.25 : 1) * (f & 2 ? 4 : 1) * (f & 8 ? 0.9 : 1), f};
+      // 인도 우선: 보행로 0.85배, 인도 붙은 차도 1.1배, 큰길(국내 시가지는 대개 인도 있음) 1.15배,
+      // 골목·단지 도로(인도 없는 경우 많음) 2배, 인도가 따로 그려졌다고 적힌 차도 자체는 3배
+      const car = f & 16 ? (f & 64 ? 3 : f & 32 ? 1.1 : f & 256 ? 2 : 1.15) : 1;
+      const e = {id: k / 3, L, w: L * (f & 4 ? 1.25 : 1) * (f & 2 ? 4 : 1) * (f & 8 ? 0.85 : 1) * car, f};
       adj[a].push(b, e); adj[b].push(a, e);
     }
     return {G, n, adj, trailMul: 1};
@@ -54,17 +57,20 @@
       const r = sp(P, a, b, pen); if (!r) return null;
       r.es.forEach(e => pen.add(e.id)); path = path.concat(r.path.slice(1)); es = es.concat(r.es);
     }
-    let L = 0, rep = 0, trail = 0, steps = 0; const seen = new Set();
-    for (const e of es) { L += e.L; if (seen.has(e.id)) rep += e.L; seen.add(e.id); if (e.f & 1) trail += e.L; if (e.f & 2) steps++; }
-    return {path, L, rep: rep / L, trail: trail / L, steps, th};
+    let L = 0, rep = 0, trail = 0, steps = 0, road = 0; const seen = new Set();
+    for (const e of es) { L += e.L; if (seen.has(e.id)) rep += e.L; seen.add(e.id); if (e.f & 1) trail += e.L; if (e.f & 2) steps++; if ((e.f & 256) && !(e.f & 32)) road += e.L; }
+    return {path, es, L, rep: rep / L, trail: trail / L, road: road / L, steps, th};
   }
 
   // 25m 간격으로 다시 찍고 고도를 노드 사이에서 보간한다
   function finish(P, c) {
     const N = P.G.nodes, EL = P.G.elev, pts = [N[2*c.path[0]], N[2*c.path[0]+1]], el = [EL[c.path[0]] / 10];
-    let carry = 0;
+    let carry = 0, onSig = false; const sigAt = [];
     for (let k = 0; k < c.path.length - 1; k++) {
       const a = c.path[k], b = c.path[k + 1], x1 = N[2*a], y1 = N[2*a+1], x2 = N[2*b], y2 = N[2*b+1], seg = Math.hypot(x2 - x1, y2 - y1);
+      const sg = !!(c.es && c.es[k] && (c.es[k].f & 128));
+      if (sg && !onSig && !(sigAt.length && pts.length/2 - 1 - sigAt[sigAt.length-1] < 2)) sigAt.push(pts.length/2 - 1);
+      onSig = sg;
       if (!seg) continue;
       let pos = STEP - carry;
       while (pos <= seg) { const f = pos / seg; pts.push(Math.round(x1 + (x2 - x1)*f), Math.round(y1 + (y2 - y1)*f)); el.push((EL[a] + (EL[b] - EL[a])*f) / 10); pos += STEP; }
@@ -76,7 +82,7 @@
     const gr = []; for (let k = 0; k + 2 < sm.length; k += 2) gr.push((sm[k+2] - sm[k]) / 50 * 100);
     const g = gr.length ? gr.map(Math.abs) : [0], frac = f => +(g.filter(f).length / g.length).toFixed(2);
     return {pts, el: sm.map(v => +v.toFixed(1)), dist: Math.round(c.L), asc: Math.round(asc), apk: +(asc / (c.L/1000)).toFixed(1),
-            rep: +c.rep.toFixed(2), trail: +c.trail.toFixed(2), steps: c.steps, maxg: gr.length ? +Math.max(...gr).toFixed(1) : 0,
+            rep: +c.rep.toFixed(2), trail: +c.trail.toFixed(2), road: +(c.road || 0).toFixed(2), steps: c.steps, sig: sigAt.length, sigAt, maxg: gr.length ? +Math.max(...gr).toFixed(1) : 0,
             share: [frac(v => v < 2), frac(v => v >= 2 && v < 5), frac(v => v >= 5 && v < 8), frac(v => v >= 8)], th: c.th};
   }
 
@@ -99,8 +105,8 @@
       if (tick) { if (tick((i + 1) / 16) === false){ P.trailMul = 1; return null; } await new Promise(r => setTimeout(r)); }
     }
     P.trailMul = 1;
-    const score = {flat: c => c.apk + c.rep*20 + c.steps*3, mild: c => Math.abs(c.apk - 12) + c.rep*20 + c.steps*3,
-                   hill: c => -c.apk + c.rep*20, trail: c => -c.trail*40 + c.rep*20};
+    const score = {flat: c => c.apk + c.rep*20 + c.steps*3 + c.road*15, mild: c => Math.abs(c.apk - 12) + c.rep*20 + c.steps*3 + c.road*15,
+                   hill: c => -c.apk + c.rep*20 + c.road*15, trail: c => -c.trail*40 + c.rep*20};
     const out = {};
     for (const t of TERRS[pref]) {
       const pick = [];
@@ -147,13 +153,13 @@
       }
     }
     const cands = raw.map(c => {
-      let L = 0, rep = 0, trail = 0, steps = 0; const seen = new Set();
-      for (const e of c.es) { L += e.L; if (seen.has(e.id)) rep += e.L; seen.add(e.id); if (e.f & 1) trail += e.L; if (e.f & 2) steps++; }
-      const r = finish(P, {path: c.path, L, rep: rep / L, trail: trail / L, steps, th: c.th}); r.fit = Math.abs(L - T) / T; return r;
+      let L = 0, rep = 0, trail = 0, steps = 0, road = 0; const seen = new Set();
+      for (const e of c.es) { L += e.L; if (seen.has(e.id)) rep += e.L; seen.add(e.id); if (e.f & 1) trail += e.L; if (e.f & 2) steps++; if ((e.f & 256) && !(e.f & 32)) road += e.L; }
+      const r = finish(P, {path: c.path, es: c.es, L, rep: rep / L, trail: trail / L, road: road / L, steps, th: c.th}); r.fit = Math.abs(L - T) / T; return r;
     }).filter(c => c.rep <= 0.25);
     P.trailMul = 1;
-    const score = {flat: c => c.apk + c.fit*40 + c.steps*3, mild: c => Math.abs(c.apk - 12) + c.fit*40 + c.steps*3,
-                   hill: c => -c.apk + c.fit*40, trail: c => -c.trail*40 + c.fit*40};
+    const score = {flat: c => c.apk + c.fit*40 + c.steps*3 + c.road*15, mild: c => Math.abs(c.apk - 12) + c.fit*40 + c.steps*3 + c.road*15,
+                   hill: c => -c.apk + c.fit*40 + c.road*15, trail: c => -c.trail*40 + c.fit*40};
     const out = {};
     for (const k of TERRS[pref]) {
       const pick = [];
@@ -187,8 +193,9 @@
     }
     P.trailMul = 1;
     if (!best) return null;
-    const d = finish(P, {path: best.p.path, L: best.L || 1, rep: 0, trail: 0, steps: 0, th: 0});
-    return Object.assign({}, r, {pts: d.pts.concat(r.pts.slice(2 * best.i)), el: d.el.concat(r.el.slice(best.i)),
+    const d = finish(P, {path: best.p.path, es: best.p.es, L: best.L || 1, rep: 0, trail: 0, steps: 0, th: 0}), m = d.pts.length / 2;
+    const sigAt = d.sigAt.concat((r.sigAt || []).filter(i => i >= best.i).map(i => i - best.i + m));
+    return Object.assign({}, r, {pts: d.pts.concat(r.pts.slice(2 * best.i)), el: d.el.concat(r.el.slice(best.i)), sigAt, sig: sigAt.length,
                                  dist: Math.round(best.L + (n - 1 - best.i) * STEP), rerouted: true});
   }
 
