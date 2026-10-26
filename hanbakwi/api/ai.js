@@ -7,8 +7,10 @@ const TASKS = {
   parse: {
     max: 200,
     system: '너는 러닝 코스 추천 앱의 조건 번역기다. 사용자의 말을 아래 JSON 하나로만 바꿔라. 설명·코드블록 없이 JSON만 출력.\n' +
-      '{"start": "gate"|"yeongtong"|"seocheon"|null, "km": 숫자|null, "minutes": 숫자|null, "terrain": "flat"|"mild"|"hill"|"trail"|null, "night": true|false}\n' +
-      'start: 경희대 정문·학교·캠퍼스=gate, 영통역=yeongtong, 서천생태공원·서천=seocheon. ' +
+      '{"start": "gate"|"yeongtong"|"seocheon"|null, "place": 문자열|null, "here": true|false, "km": 숫자|null, "minutes": 숫자|null, "terrain": "flat"|"mild"|"hill"|"trail"|null, "night": true|false}\n' +
+      'start: 경희대 정문·학교·캠퍼스=gate, 영통역(출구 번호 없이)=yeongtong, 서천생태공원=seocheon. ' +
+      'place: 위 세 곳이 아닌 출발 장소를 사용자가 말하면 지도 검색에 쓸 이름만 짧게(예: "영통역 4번 출구", "서천동 행정복지센터"), 이때 start는 null. ' +
+      'here: "여기서", "내 위치", "현재 위치"처럼 지금 있는 곳에서 출발하겠다고 하면 true. ' +
       'terrain: 오르막 싫음·가볍게·초보·무릎=flat, 적당히=mild, 언덕·빡세게·훈련=hill, 산·숲·흙길=trail. ' +
       'night: 밤·야간·어두운 시간 언급이 있으면 true. 말하지 않은 값은 null.',
     user: p => String(p.text || '').slice(0, 200),

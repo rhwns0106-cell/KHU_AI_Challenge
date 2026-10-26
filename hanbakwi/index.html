@@ -202,6 +202,7 @@ canvas.drag{cursor:grabbing}
 
     <div class="controls">
       <div class="ctl"><span id="l-start">출발지</span><div class="seg" id="seg-start" role="group" aria-labelledby="l-start"></div></div>
+      <p class="refine-msg" id="startmsg" aria-live="polite"></p>
       <div class="ctl"><span id="l-dist">거리</span><div class="seg" id="seg-dist" role="group" aria-labelledby="l-dist"></div></div>
       <div class="ctl"><span id="l-terr">지형</span><div class="seg" id="seg-terr" role="group" aria-labelledby="l-terr"></div></div>
     </div>
@@ -262,6 +263,8 @@ canvas.drag{cursor:grabbing}
 
 <script src="data.js"></script>
 <script src="signals.js"></script>
+<script src="graph.js"></script>
+<script src="loop.js"></script>
 <script>
 (function(){
 const DATA = window.HANBAKWI_DATA;
@@ -308,6 +311,7 @@ function parseAsk(text){
   if (/영통/.test(t)) out.start = 'yeongtong';
   else if (/서천|생태공원/.test(t)) out.start = 'seocheon';
   else if (/정문|학교|캠퍼스|경희/.test(t)) out.start = 'gate';
+  if (/여기서|내 위치|현재 위치|지금 위치/.test(t)){ out.here = true; delete out.start; }
   return out;
 }
 function nearestDist(km){ return DIST_OPTS.map(d=>d[0]).reduce((a,b)=>Math.abs(b-km)<Math.abs(a-km)?b:a); }
@@ -327,6 +331,55 @@ async function applyAsk(){
   if (!a || seq !== askSeq) return;
   const km = a.km || (a.minutes ? a.minutes / PACE : null);
   applyParsed({start:a.start || undefined, km:km || undefined, min:a.minutes || undefined, terr:a.terrain || undefined}, 'ai');
+  if (a.here) useMyLocation(); else if (a.place) findPlace(a.place);
+}
+
+/* ---------- 내가 정한 출발지: 내 위치 · 장소 검색 · 지도에서 찍기 ---------- */
+let P = null, gen = null, genPct = 0, pickMode = false;
+const graph = () => P || (P = OrcaLoop.prep(window.ORCA_GRAPH));
+function startMsg(m){ document.getElementById('startmsg').textContent = m; }
+let locTok = 0; // 늦게 도착한 위치 응답이 그사이 고른 출발지를 덮지 않게
+function setCustom(name, x, y){
+  locTok++;
+  const [node, d] = OrcaLoop.near(graph(), x, y);
+  if (d > 300){ startMsg('그곳은 orca가 길을 아는 지역(국제캠 주변 약 4km) 밖이에요.'); return; }
+  const G = graph().G, label = name.length > 12 ? name.slice(0, 12) + '…' : name;
+  Object.keys(R).forEach(k => { if (k.startsWith('custom|')) delete R[k]; });
+  [START_OPTS, B.starts].forEach(a => { const i = a.findIndex(o => (o.id || o[0]) === 'custom'); if (i >= 0) a.splice(i, 1); });
+  START_OPTS.unshift(['custom', label]);
+  B.starts.unshift({id:'custom', name:label, x:G.nodes[2*node], y:G.nodes[2*node+1], node});
+  Object.assign(state, {start:'custom', sel:0, focus:-1});
+  startMsg(''); renderAll(true);
+}
+function useMyLocation(){
+  if (!navigator.geolocation || !window.isSecureContext){ startMsg('내 위치는 https 주소에서만 쓸 수 있어요.'); return; }
+  startMsg('내 위치를 찾는 중이에요…');
+  const tok = ++locTok;
+  navigator.geolocation.getCurrentPosition(p => { if (tok === locTok) setCustom('내 위치', (p.coords.longitude - LO0)*KX, (p.coords.latitude - LA0)*KY); },
+    e => tok === locTok && startMsg(e.code === 1 ? '위치 권한이 꺼져 있어요. 브라우저 설정에서 허용해 주세요.' : '위치를 찾지 못했어요. 지도에서 찍기로 골라 주세요.'),
+    {enableHighAccuracy:true, timeout:15000});
+}
+// 장소 이름 → 좌표: OpenStreetMap 검색(Nominatim), 지원 지역 안에서만 찾는다
+async function findPlace(name){
+  startMsg('"' + name + '"을(를) 지도에서 찾는 중이에요…');
+  // 세부 이름(출구 번호 등)으로 못 찾으면 떼고 한 번 더
+  for (const q of [...new Set([name, name.replace(/\s*\d+\s*번\s*(출구|게이트|문)/, '').trim()])]){
+    try {
+      const u = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=ko&countrycodes=kr&bounded=1&viewbox=127.0558,37.2642,127.1078,37.2222&q=' + encodeURIComponent(q);
+      const r = (await (await fetch(u)).json())[0];
+      if (r) return setCustom(name, (+r.lon - LO0)*KX, (+r.lat - LA0)*KY);
+    } catch(e){}
+  }
+  startMsg('"' + name + '"을(를) 지도에서 못 찾았어요. "지도에서 찍기"로 직접 골라 주세요.');
+}
+// 내가 정한 출발지는 코스를 미리 만들어 두지 않았으니, 거리가 바뀔 때마다 그 자리에서 만든다
+function ensureRoutes(){
+  if (state.start !== 'custom' || R['custom|'+state.dist+'|flat'] || gen) return;
+  const D = state.dist, st = B.starts.find(s => s.id === 'custom'); gen = D; genPct = 0;
+  OrcaLoop.makeLoops(graph(), st.node, D*1000, p => { genPct = p; renderCards(); }).then(out => {
+    for (const t in out) R['custom|'+D+'|'+t] = out[t];
+    gen = null; renderAll(true);
+  });
 }
 function applyParsed(p, source){
   const chips = [];
@@ -504,7 +557,7 @@ function zoomAt(f, sx, sy){
   draw();
 }
 const ptrs = new Map(); let pinch0 = null;
-cv.addEventListener('pointerdown', e => { run.follow = false; cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.offsetX, e.offsetY]); cv.classList.add('drag'); });
+cv.addEventListener('pointerdown', e => { tap0 = [e.offsetX, e.offsetY]; run.follow = false; cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.offsetX, e.offsetY]); cv.classList.add('drag'); });
 cv.addEventListener('pointermove', e => {
   if (!ptrs.has(e.pointerId)) return;
   const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.offsetX, e.offsetY]);
@@ -515,7 +568,13 @@ cv.addEventListener('pointermove', e => {
     pinch0 = d;
   }
 });
-function up(e){ ptrs.delete(e.pointerId); pinch0 = null; if (!ptrs.size) cv.classList.remove('drag'); }
+let tap0 = null;
+function up(e){
+  if (pickMode && tap0 && Math.hypot(e.offsetX - tap0[0], e.offsetY - tap0[1]) < 6){
+    pickMode = false;
+    setCustom('지도에서 고른 곳', view.cx + (e.offsetX - cv.width/dpr/2)/view.s, view.cy - (e.offsetY - cv.height/dpr/2)/view.s);
+  }
+  ptrs.delete(e.pointerId); pinch0 = null; if (!ptrs.size) cv.classList.remove('drag'); }
 cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
 cv.addEventListener('wheel', e => { e.preventDefault(); zoomAt(e.deltaY < 0 ? 1.2 : 1/1.2, e.offsetX, e.offsetY); }, {passive:false});
 document.getElementById('zin').onclick = () => zoomAt(1.4, cv.width/dpr/2, cv.height/dpr/2);
@@ -594,7 +653,7 @@ function renderStrip(){
 }
 function renderCards(){
   const rs = current(), el = document.getElementById('cards');
-  if (!rs.length){ el.innerHTML = '<p class="empty">이 조건에 맞는 코스가 아직 없어요. 거리나 지형을 바꿔보세요.</p>'; return; }
+  if (!rs.length){ el.innerHTML = '<p class="empty">' + (gen ? '이 출발지에서 돌아오는 코스를 실제 길 위에 만드는 중이에요… ' + Math.round(genPct*100) + '%' : '이 조건에 맞는 코스가 아직 없어요. 거리나 지형을 바꿔보세요.') + '</p>'; return; }
   el.innerHTML = '';
   rs.forEach((r, i) => {
     const b = document.createElement('button'); b.type='button'; b.className='course';
@@ -919,7 +978,12 @@ document.getElementById('voicebtn').onclick = e => {
 setInterval(() => { if (run.mode !== 'idle'){ autoCheck(); renderRun(); } }, 1000);
 
 function renderAll(refit){
-  seg('seg-start', START_OPTS, 'start'); seg('seg-dist', DIST_OPTS, 'dist'); seg('seg-terr', TERR_OPTS, 'terr');
+  ensureRoutes();
+  seg('seg-start', START_OPTS, 'start');
+  [['내 위치', useMyLocation], ['지도에서 찍기', () => { pickMode = true; startMsg('지도에서 출발할 곳을 한 번 눌러 주세요.'); }]].forEach(([label, fn]) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = '+ ' + label; b.onclick = fn;
+    document.getElementById('seg-start').appendChild(b);
+  }); seg('seg-dist', DIST_OPTS, 'dist'); seg('seg-terr', TERR_OPTS, 'terr');
   renderCards(); renderStrip(); renderProfile(); renderBrief();
   if (refit) fit();
   draw();
