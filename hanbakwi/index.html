@@ -156,6 +156,13 @@ canvas.drag{cursor:grabbing}
 .runlog{margin:0;padding:0;list-style:none;font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
 .runlog b{color:var(--porcelain);font-family:var(--num);font-size:15px;font-weight:600}
 
+.pocketbtn{width:100%;flex:none}
+.pocket{position:fixed;inset:0;z-index:50;background:#000;color:#D8DCE4;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:18px;padding:24px;text-align:center;cursor:pointer}
+.pocket[hidden]{display:none}
+.pk-time{margin:0;font-family:var(--num);font-size:88px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.pk-dist{margin:0;font-size:20px}.pk-dist b{font-family:var(--num);font-size:30px;font-weight:600}
+.pk-guide{margin:0;font-size:22px;font-weight:800;max-width:24ch;color:#fff}
+.pk-hint{margin:0;font-size:13px;color:#8A90A0;max-width:30ch}
 .report{display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid var(--rule);border-radius:10px;background:var(--panel)}
 .report h3{margin:0;font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
 .report p{margin:0}
@@ -274,6 +281,7 @@ canvas.drag{cursor:grabbing}
       <button class="linkbtn" id="simbtn" type="button">GPS 없이 시뮬레이션으로 시험하기</button>
       <button class="linkbtn" id="awaybtn" type="button" hidden>시뮬레이션: 일부러 길 벗어나기</button>
       <button class="linkbtn" id="voicebtn" type="button" aria-pressed="true">음성 안내 켜짐</button>
+      <button class="rbtn pocketbtn" id="pocketbtn" type="button" hidden>주머니 모드 · 화면 켠 채로 넣기</button>
       <div class="report" id="report" hidden aria-live="polite"></div>
       <ul class="runlog" id="runlog"></ul>
     </section>
@@ -293,6 +301,12 @@ canvas.drag{cursor:grabbing}
   </main>
 </div>
 
+<div class="pocket" id="pocket" hidden role="dialog" aria-label="주머니 모드">
+  <p class="pk-time" id="pk-time">0:00</p>
+  <p class="pk-dist"><b id="pk-dist">0.00</b> km · 페이스 <b id="pk-pace">--</b></p>
+  <p class="pk-guide" id="pk-guide"></p>
+  <p class="pk-hint">화면을 끄면 기록이 멈춰요. 이 화면 그대로 주머니에 넣으세요. 화면을 누르면 돌아가요.</p>
+</div>
 <script src="data.js"></script>
 <script src="graph.js"></script>
 <script src="loop.js"></script>
@@ -1030,6 +1044,22 @@ function onFix(x, y, acc, heading){
   const t = now();
   run.pos = {x, y, acc};
   if (heading != null && !isNaN(heading)) run.heading = heading;
+  if (run.mode === 'running' && acc <= 35 && run.resumeGap){
+    run.resumeGap = false;
+    const seg = run.segs[run.segs.length-1], last = seg[seg.length-1], n = run.route.pts.length/2;
+    let bi = -1, bd = Infinity;
+    for (let i = run.prog; i < n; i++){ const [px, py] = rp(i), dd = Math.hypot(px-x, py-y); if (dd < bd){ bd = dd; bi = i; } } // 공백 뒤엔 남은 코스 전체에서 찾는다
+    const gapS = Math.max(1, (t - run.hiddenAt)/1000), straight = last ? Math.hypot(x-last[0], y-last[1]) : 0;
+    const est = Math.max(straight, bd < 40 ? (bi - run.prog)*STEP : 0);
+    if (last && est > 20 && est/gapS < 6.5){ // 사람이 달릴 수 있는 속도(6.5m/s 미만)면 그 사이 달린 것으로 친다
+      run.dist += est;
+      if (bd < 40 && bi > run.prog){ run.climbed += climbBetween(run.route, run.prog, bi); run.prog = bi; }
+      run.segs.push([]); // 공백 구간은 지도에 직선으로 잇지 않는다
+      while (run.dist >= (run.splits.length+1)*1000) kmDone();
+      status('화면이 꺼져 있던 ' + fmtClock(gapS*1000) + ' 동안은 위치를 못 받아서, 코스를 따라 ' + (est/1000).toFixed(2) + 'km 달린 것으로 추정했어요.');
+    }
+    run.lastMoveT = t;
+  }
   if (run.mode === 'running' && acc <= 35){
     const seg = run.segs[run.segs.length-1], last = seg[seg.length-1];
     const d = last ? Math.hypot(x-last[0], y-last[1]) : 0;
@@ -1087,6 +1117,7 @@ function renderRun(){
   document.getElementById('rstats').hidden = !on;
   document.getElementById('guide').hidden = !on;
   document.getElementById('simbtn').hidden = on;
+  document.getElementById('pocketbtn').hidden = !on;
   document.getElementById('awaybtn').hidden = !(run.sim && run.mode === 'running' && !run.simAway);
   const B_ = {start:['시작','primary'], rest:['휴식',''], resume:['다시 달리기','primary'], end:['종료','end']};
   const want = run.mode === 'idle' ? ['start'] : run.mode === 'running' ? ['rest','end'] : ['resume','end'];
@@ -1127,6 +1158,12 @@ function renderRun(){
   }
   if (run.pos.acc > 35) sub += ' · GPS 오차 ' + Math.round(run.pos.acc) + 'm';
   document.getElementById('gsub').textContent = sub;
+  if (!document.getElementById('pocket').hidden){
+    document.getElementById('pk-time').textContent = document.getElementById('r-time').textContent;
+    document.getElementById('pk-dist').textContent = document.getElementById('r-dist').textContent;
+    document.getElementById('pk-pace').textContent = document.getElementById('r-pace').textContent;
+    document.getElementById('pk-guide').textContent = document.getElementById('gmain').textContent;
+  }
 }
 
 function drawRun(){
@@ -1179,11 +1216,17 @@ function kmDone(){
 }
 // 8초 넘게 제자리면 자동 정지(신호 대기 등), 다시 움직이면 onFix에서 재개
 function autoCheck(){
+  if (document.hidden || run.resumeGap) return; // 화면이 꺼져 위치가 안 오는 건 멈춘 게 아니다
   if (run.mode !== 'running' || run.auto || !run.lastMoveT || now() - run.lastMoveT < 8000) return;
   run.activeMs += Math.max(0, run.lastMoveT - run.since); run.since = run.lastMoveT; run.auto = true; run.stops++;
 }
 async function keepAwake(){ try { run.lock = await navigator.wakeLock.request('screen'); } catch(e){} }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && run.mode !== 'idle') keepAwake(); });
+document.addEventListener('visibilitychange', () => {
+  if (run.mode === 'idle' || run.sim) return;
+  if (document.hidden){ run.hiddenAt = now(); return; }
+  keepAwake();
+  if (run.mode === 'running' && !run.auto && run.hiddenAt && now() - run.hiddenAt > 5000){ run.resumeGap = true; run.lastMoveT = now(); }
+});
 
 function startTracking(sim){
   run.sim = sim;
@@ -1236,6 +1279,7 @@ const ACT = {
     run.mode = 'running';
     if (!startTracking(sim === true)){ run.mode = 'idle'; renderRun(); return; }
     run.since = now(); keepAwake(); renderRun();
+    if (!sim) status('화면을 끄면 휴대폰이 위치를 안 보내서 기록이 멈춰요. 주머니에 넣을 땐 아래 "주머니 모드"를 켜 두세요.');
     document.getElementById('report').hidden = true;
     speak('출발합니다. ' + (r.dist/1000).toFixed(1) + '킬로미터 ' + (state.dest ? endName() + '까지 가는' : '순환') + ' 코스예요.'); // 시작 버튼 탭이 있어야 휴대폰에서 음성이 나온다
   },
@@ -1255,7 +1299,7 @@ const ACT = {
       fetch('/api/runs', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:DEVICE, run:rec})})
         .then(r => { serverOK = r.ok; renderLog(); }).catch(() => {});
     }
-    run.mode = 'idle'; run.sim = null;
+    run.mode = 'idle'; run.sim = null; document.getElementById('pocket').hidden = true;
     status(rec.km > 0.05 ? '기록을 저장했어요: ' + rec.km.toFixed(2) + 'km, ' + fmtClock(rec.ms) + ', 평균 ' + fmtPace(rec.ms/1000/rec.km) + '/km' : '이동 거리가 거의 없어서 페이스는 계산하지 않았어요.');
     renderRun(); renderLog(); draw();
     if (rec.km >= 0.3) askFeel(rec);
@@ -1296,6 +1340,8 @@ function renderLog(){
     (r.km > 0.05 ? ' · 평균 <b>' + fmtPace(r.ms/1000/r.km) + '</b>' : '') + '</li>').join('');
 }
 document.getElementById('simbtn').onclick = () => ACT.start(true);
+document.getElementById('pocketbtn').onclick = () => { document.getElementById('pocket').hidden = false; keepAwake(); renderRun(); };
+document.getElementById('pocket').onclick = () => { document.getElementById('pocket').hidden = true; };
 document.getElementById('awaybtn').onclick = () => {
   if (!run.route || !run.sim) return;
   const k = Math.floor(run.simI), [x, y] = rp(k), [nx, ny] = rp(k+2), L = Math.hypot(nx-x, ny-y) || 1;
