@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "hanbakwi/index.html"
+        ],
+        "createdAt": "2026-10-26T05:57:58.467Z",
+        "reason": "Claude: same placeholder as before (--faint #7e88a8 on #111a3d, ~4.7:1, meets AA), earlier ignore was scoped to the path seen from hanbakwi/"
+      }
+    ]
+  }
+}
