@@ -28,5 +28,11 @@ const id = '123e4567-e89b-42d3-a456-426614174000';
   const first = JSON.parse(store['runs:' + id][0]);   // 방금 넣은 것
   assert.deepEqual(first.cells, [1, 2]);            // 정수 칸만
   assert.ok(!('evil' in first) && !('lat' in first)); // 모르는 칸은 버림
+  // 다른 사람(다른 기기 id)은 서로의 기록을 못 본다
+  const other = '987e6543-e21b-42d3-a456-426614174999';
+  await call({method: 'POST', query: {}, body: {id: other, run: {km: 9.9, label: '다른 사람'}}});
+  const mine = (await call({method: 'GET', query: {id}})).body.runs, theirs = (await call({method: 'GET', query: {id: other}})).body.runs;
+  assert.ok(mine.every(r => r.label !== '다른 사람'));
+  assert.equal(theirs.length, 1); assert.equal(theirs[0].label, '다른 사람');
   console.log('OK');
 })().catch(e => { console.error(e); process.exit(1); });
