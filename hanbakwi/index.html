@@ -495,7 +495,11 @@ function useMyLocation(){
   if (!navigator.geolocation || !window.isSecureContext){ startMsg('내 위치는 https 주소에서만 쓸 수 있어요.'); return; }
   startMsg('내 위치를 찾는 중이에요…');
   const tok = ++locTok;
-  navigator.geolocation.getCurrentPosition(p => { if (tok === locTok) setCustom('내 위치', (p.coords.longitude - LO0)*KX, (p.coords.latitude - LA0)*KY); },
+  startCompass();
+  navigator.geolocation.getCurrentPosition(p => {
+    ME = {x:(p.coords.longitude - LO0)*KX, y:(p.coords.latitude - LA0)*KY, acc:p.coords.accuracy};
+    if (tok === locTok) setCustom('내 위치', ME.x, ME.y);
+  },
     e => tok === locTok && startMsg(e.code === 1 ? '위치 권한이 꺼져 있어요. 브라우저 설정에서 허용해 주세요.' : '위치를 찾지 못했어요. 지도에서 찍기로 골라 주세요.'),
     {enableHighAccuracy:true, timeout:15000});
 }
@@ -733,6 +737,21 @@ const BASES = {
              (z,x,y) => 'https://api.vworld.kr/req/wmts/1.0.0/' + VWORLD_KEY + '/Hybrid/' + z + '/' + y + '/' + x + '.png']}
 };
 let base = 'dark', drawQueued = false;
+function queueDraw(){ if (!drawQueued){ drawQueued = true; requestAnimationFrame(() => { drawQueued = false; draw(); }); } }
+// 나침반: 안드로이드는 deviceorientationabsolute(alpha), 아이폰은 webkitCompassHeading(누른 순간 권한 요청 필요)
+let COMPASS = null, compassOn = false, ME = null; // ME: 마지막으로 받은 내 위치(달리기 전 '내 위치'용)
+function startCompass(){
+  if (compassOn || !window.DeviceOrientationEvent) return; compassOn = true;
+  const on = e => {
+    let h = e.webkitCompassHeading != null ? e.webkitCompassHeading : (e.absolute && e.alpha != null ? 360 - e.alpha : null);
+    if (h == null) return;
+    h = (h + ((screen.orientation && screen.orientation.angle) || 0) + 360) % 360;
+    if (COMPASS == null || Math.abs(angDiff(h, COMPASS)) > 3){ COMPASS = h; queueDraw(); }
+  };
+  const go = () => addEventListener('ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation', on);
+  if (DeviceOrientationEvent.requestPermission) DeviceOrientationEvent.requestPermission().then(r => r === 'granted' && go()).catch(() => { compassOn = false; });
+  else go();
+}
 // 테마: 자동(기기 설정) / 라이트 / 다크. 고른 값은 이 기기에만 기억한다
 function isDark(){ const t = document.documentElement.dataset.theme; return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
 function applyTheme(t){
@@ -844,7 +863,7 @@ function draw(){
     }
   }
   ctx.setTransform(dpr,0,0,dpr,0,0);
-  drawRun();
+  drawRun(); drawMe();
   if (state.dest){ // 도착지: 코발트 큰 원
     const [x, y] = toScreen(state.dest.x, state.dest.y);
     ring(x, y, 11, 6, css('--cobalt-ink'));
@@ -1124,7 +1143,7 @@ function rp(i){ const p = run.route.pts, k = Math.max(0, Math.min(p.length/2-1, 
 function onFix(x, y, acc, heading){
   if (run.mode === 'idle') return;
   const t = now();
-  run.pos = {x, y, acc};
+  run.pos = {x, y, acc}; if (!run.sim) ME = run.pos;
   if (heading != null && !isNaN(heading)) run.heading = heading;
   if (run.mode === 'running' && acc <= 35 && run.resumeGap){
     run.resumeGap = false;
@@ -1246,6 +1265,12 @@ function renderRun(){
     document.getElementById('pk-pace').textContent = document.getElementById('r-pace').textContent;
     document.getElementById('pk-guide').textContent = document.getElementById('gmain').textContent;
   }
+  if (NATIVE && !run.sim && now() - (run.notifyAt || 0) > 3000){
+    run.notifyAt = now();
+    const T = id => document.getElementById(id).textContent;
+    CAP.nativePromise('RunNotify', 'update', {title:T('r-dist') + 'km · ' + T('r-time'),
+      text:(run.mode === 'running' && !run.auto ? '' : '일시정지 · ') + '페이스 ' + T('r-pace') + (T('gmain') ? ' · ' + T('gmain') : '')}).catch(()=>{});
+  }
 }
 
 function drawRun(){
@@ -1256,15 +1281,21 @@ function drawRun(){
     ctx.beginPath(); seg.forEach(([x, y], i) => { const [sx, sy] = toScreen(x, y); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
     ctx.strokeStyle = css('--cobalt-ink'); ctx.lineWidth = 4; ctx.stroke();
   });
-  if (!run.pos || run.mode === 'idle') return;
-  const [x, y] = toScreen(run.pos.x, run.pos.y);
-  ctx.beginPath(); ctx.arc(x, y, Math.max(10, run.pos.acc*view.s), 0, Math.PI*2); ctx.globalAlpha = .2; ctx.fillStyle = css('--cobalt'); ctx.fill(); ctx.globalAlpha = 1;
-  if (run.heading != null){
-    ctx.save(); ctx.translate(x, y); ctx.rotate(run.heading*Math.PI/180);
-    ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(7, -8); ctx.lineTo(-7, -8); ctx.closePath(); ctx.fillStyle = css('--cobalt-ink'); ctx.fill();
+}
+// 내 위치 점 + 바라보는 방향 부채꼴(나침반, 없으면 달리는 방향)
+function drawMe(){
+  const p = run.mode !== 'idle' && run.pos ? run.pos : ME;
+  if (!p) return;
+  const [x, y] = toScreen(p.x, p.y), c = css('--cobalt'), hd = COMPASS != null ? COMPASS : run.mode !== 'idle' ? run.heading : null;
+  ctx.beginPath(); ctx.arc(x, y, Math.max(10, (p.acc || 0)*view.s), 0, Math.PI*2); ctx.globalAlpha = .15; ctx.fillStyle = c; ctx.fill(); ctx.globalAlpha = 1;
+  if (hd != null){
+    ctx.save(); ctx.translate(x, y); ctx.rotate(hd*Math.PI/180);
+    const g = ctx.createRadialGradient(0, 0, 6, 0, 0, 52); g.addColorStop(0, c + 'B0'); g.addColorStop(1, c + '00');
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 52, -Math.PI/2 - 0.45, -Math.PI/2 + 0.45); ctx.closePath(); ctx.fillStyle = g; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, -19); ctx.lineTo(6, -11); ctx.lineTo(-6, -11); ctx.closePath(); ctx.fillStyle = c; ctx.fill(); // 점 위 작은 삼각형
     ctx.restore();
   }
-  ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI*2); ctx.fillStyle = css('--cobalt'); ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI*2); ctx.fillStyle = c; ctx.fill();
   ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke();
 }
 
@@ -1383,11 +1414,13 @@ function stopTracking(){
   else if (BGEO && run.watch) Promise.resolve(run.watch).then(id => BGEO.removeWatcher({id})).catch(()=>{}); // addWatcher는 id를 Promise로 준다
   else if (run.watch != null) navigator.geolocation.clearWatch(run.watch);
   run.watch = null;
+  if (NATIVE) setTimeout(() => CAP.nativePromise('RunNotify', 'clear', {}).catch(()=>{}), 500); // 마지막 갱신이 늦게 와도 알림이 남지 않게
   if (run.lock){ run.lock.release().catch(()=>{}); run.lock = null; }
 }
 
 const ACT = {
   start(sim){
+    startCompass();
     const r = current()[state.sel];
     if (!r){ status(gen ? '코스를 만드는 중이에요. 잠깐 뒤에 다시 눌러 주세요.' : '먼저 코스를 골라 주세요.'); return; }
     Object.assign(run, {route:r, prog:0, pos:null, heading:null, segs:[[]], dist:0, activeMs:0, restMs:0, stopMs:0, stops:0, auto:false, lastMoveT:0,
