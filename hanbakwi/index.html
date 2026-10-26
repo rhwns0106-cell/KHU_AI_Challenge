@@ -87,7 +87,7 @@ button,input{font:inherit;color:inherit}
 .more summary::after{content:"";margin-left:auto;flex:0 0 auto;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);transition:transform .2s var(--ease)}
 .more[open] summary::after{transform:rotate(-135deg)}
 .more-t{font-weight:800;flex:0 0 auto}
-.moresum{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.moresum{color:var(--muted);font-size:13px;line-height:1.45;min-width:0}
 .morebody{display:flex;flex-direction:column;gap:12px;padding:2px 12px 12px}
 .seg{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
 .seg::-webkit-scrollbar{display:none}
@@ -251,7 +251,7 @@ canvas.drag{cursor:grabbing}
 
     <form class="ask" id="askform">
       <div class="ask-row">
-        <label><span class="sr">원하는 코스를 말로 입력</span><input id="q" type="text" autocomplete="off" value="공강 30분인데 오르막 싫어, 정문에서 출발" placeholder="예: 40분, 평지로, 영통역에서 출발"></label>
+        <label><span class="sr">원하는 코스를 말로 입력</span><input id="q" type="text" autocomplete="off" value="" placeholder="예: 40분, 평지로, 영통역에서 출발"></label>
         <button class="mic" id="mic" type="button" aria-label="말로 입력" aria-pressed="false" hidden><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="2" width="6" height="11" rx="3" fill="currentColor"/><path d="M4 10a6 6 0 0 0 12 0M10 16v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
         <button class="go" type="submit">코스 찾기<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div>
@@ -356,7 +356,7 @@ const STEP = 25;  // 고도 표본 간격(m)
 const NAMES = ['A','B','C'];
 
 const state = {start:'gate', dist:5, terr:'flat', sel:0, budget:null, focus:-1, rev:false, dest:null, wx:'auto', rests:0};
-const WX_OPTS = [['auto','현재 날씨'],['clear','맑음'],['wet','비·눈 온 뒤'],['hot','더움']];
+const WX_OPTS = [['auto','추가 안 함'],['wet','+ 비·눈 온 뒤'],['hot','+ 더움']]; // 현재 날씨는 항상 반영, 이건 그 위에 더하는 조건
 const REST_OPTS = [[0,'안 쉬어요'],[1,'1번'],[2,'2번'],[3,'3번']];
 
 
@@ -413,6 +413,10 @@ async function ai(task, payload){
 let askSeq = 0;
 async function applyAsk(){
   const text = document.getElementById('q').value, seq = ++askSeq;
+  if (!text.trim()){ // 빈 입력: AI를 부르지 않고 기본 조건으로 보여준다
+    document.getElementById('parsed').innerHTML = '<span class="note">원하는 조건을 말로 적어 보세요. 예: 40분, 평지로, 영통역에서 출발</span>';
+    return renderAll(true);
+  }
   const rule = parseAsk(text);
   applyParsed(rule, 'rule');
   const a = await ai('parse', {text});
@@ -540,7 +544,7 @@ function ensureRoutes(){
   const s = st.node != null ? st.node : OrcaLoop.near(graph(), st.x, st.y)[0];
   const tick = p => { if (rkey(D, '') !== key || (state.terr === 'trail' ? 'trail' : 'road') !== pref) return false; genPct = p; renderCards(); };
   genPct = 0;
-  const opts = {wet:wxMode() === 'wet', hot:wxMode() === 'hot'};
+  const opts = {wet:wxMode().includes('wet'), hot:wxMode().includes('hot')};
   const job = state.dest ? OrcaLoop.makeRoutes(graph(), s, state.dest.node, D*1000, tick, pref, opts) : OrcaLoop.makeLoops(graph(), s, D*1000, tick, pref, opts);
   const g = job.then(out => {
     if (gen === g) gen = null;
@@ -652,7 +656,11 @@ function directed(r, rev){
 }
 function rkey(d = state.dist, t = state.terr){ return state.start + (state.dest ? '>' + state.dest.key : '') + '|' + d + '|' + wxMode() + '|' + t; } // 지형은 맨 끝: 저장할 때 rkey(D, '') + 지형
 let NOW = null; // 현재 날씨 {temp, mode:'wet'|'hot'|'clear', desc}
-function wxMode(){ return state.wx === 'auto' ? (NOW ? NOW.mode : 'clear') : state.wx; }
+// 현재 날씨 + 고른 날씨를 합친 조건: 'clear' | 'wet' | 'hot' | 'wet+hot'
+function wxMode(){
+  const m = new Set([NOW ? NOW.mode : 'clear', state.wx]); m.delete('clear'); m.delete('auto');
+  return m.size ? ['wet', 'hot'].filter(k => m.has(k)).join('+') : 'clear';
+}
 const WCODE = c => c === 0 ? '맑음' : c <= 3 ? '구름' : c <= 48 ? '안개' : c <= 67 ? '비' : c <= 77 ? '눈' : c <= 82 ? '소나기' : c <= 86 ? '눈' : '뇌우';
 async function loadWeather(){
   try {
@@ -663,13 +671,14 @@ async function loadWeather(){
     const wet = c.precipitation > 0 || c.snowfall > 0 || sum(d.hourly.precipitation) >= 0.3 || sum(d.hourly.snowfall) > 0 || (c.weather_code >= 51 && c.weather_code <= 99 && c.weather_code !== 45 && c.weather_code !== 48);
     NOW = {temp:Math.round(c.temperature_2m), mode: wet ? 'wet' : c.temperature_2m >= 28 ? 'hot' : 'clear', desc:WCODE(c.weather_code)};
   } catch(e){ NOW = null; }
-  renderAll(state.wx === 'auto');
+  renderAll(true);
 }
 function wxNote(){
-  const m = wxMode(), head = state.wx === 'auto' ? (NOW ? '지금 ' + NOW.temp + '°C · ' + NOW.desc + '. ' : '현재 날씨를 가져오는 중이에요. ') : '고른 날씨: ' + WX_OPTS.find(o => o[0] === state.wx)[1] + '. ';
-  if (m === 'wet') return head + '비·눈 온 뒤라 노면이 미끄러워요. 오르막·내리막이 가장 적은 코스로 골랐어요. 보폭을 줄이고 내리막은 천천히 달리세요.';
-  if (m === 'hot') return head + '더운 날이라 그늘(공원·가로수·숲 옆 길)이 많은 코스를 우선했어요. 물을 챙기고 평소보다 페이스를 낮추세요.';
-  return head + (NOW && state.wx === 'auto' && NOW.temp <= 3 ? '기온이 낮아요. 충분히 워밍업하고 시작하세요.' : '달리기 좋은 날씨예요.');
+  const m = wxMode(), head = (NOW ? '현재 날씨(' + NOW.temp + '°C ' + NOW.desc + ') 반영' : '현재 날씨를 가져오는 중') + (state.wx !== 'auto' ? ' + 고른 조건: ' + WX_OPTS.find(o => o[0] === state.wx)[1].slice(2) : '') + '. ', out = [];
+  if (m.includes('wet')) out.push('노면이 미끄러울 수 있어 오르막·내리막이 적은 코스로 골랐어요. 보폭을 줄이고 내리막은 천천히 달리세요.');
+  if (m.includes('hot')) out.push('더운 날이라 그늘(공원·가로수·숲 옆 길)이 많은 코스를 우선했어요. 물을 챙기고 평소보다 페이스를 낮추세요.');
+  if (!out.length) out.push(NOW && NOW.temp <= 3 ? '기온이 낮아요. 충분히 워밍업하고 시작하세요.' : '달리기 좋은 날씨예요.');
+  return head + out.join(' ');
 }
 function current(){ return (R[rkey()] || []).map(r => directed(r, state.rev)); }
 function startName(){ return START_OPTS.find(s=>s[0]===state.start)[1]; }
@@ -987,7 +996,7 @@ function renderCards(){
     b.innerHTML =
       '<span class="badge">' + NAMES[i] + '</span>' +
       '<span><b>' + NAMES[i] + '선 · ' + courseName() + '</b>' +
-      '<small>' + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · ' + (wxMode() === 'hot' ? '그늘 ' + Math.round((r.shade || 0)*100) + '% · ' : '') + (wxMode() === 'wet' ? '5% 넘는 경사 ' + Math.round((r.share[2] + r.share[3])*100) + '% · ' : '') + (r.trail > 0.02 ? '산길 ' + Math.round(r.trail*100) + '% · ' : '') + (r.road > 0.1 ? '골목 차도 ' + Math.round(r.road*100) + '% · ' : '') + '상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small>' +
+      '<small>' + eta(r).min + '분 · 신호 ' + eta(r).sig + '곳 · ' + (wxMode().includes('hot') ? '그늘 ' + Math.round((r.shade || 0)*100) + '% · ' : '') + (wxMode().includes('wet') ? '5% 넘는 경사 ' + Math.round((r.share[2] + r.share[3])*100) + '% · ' : '') + (r.trail > 0.02 ? '산길 ' + Math.round(r.trail*100) + '% · ' : '') + (r.road > 0.1 ? '골목 차도 ' + Math.round(r.road*100) + '% · ' : '') + '상승 ' + r.asc + 'm · 최대 경사 ' + r.maxg.toFixed(0) + '%</small>' +
       '<span class="tags">' + (why[i] ? '<i>' + why[i] + '</i>' : '') + checks(r).map(([ok, t]) => '<i class="' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓ ' : '! ') + t + '</i>').join('') + '</span></span>' +
       '<span class="km">' + (r.dist/1000).toFixed(2) + '<em>km</em></span>';
     b.addEventListener('click', () => { state.sel = i; state.focus = -1; renderAll(false); });
@@ -1269,7 +1278,11 @@ function reroute(){
 }
 function activeNow(){ return run.activeMs + (run.mode === 'running' && !run.auto ? now() - run.since : 0); }
 function climbBetween(r, a, b){ let s = 0; for (let i = Math.max(0, a); i < Math.min(r.el.length-1, b); i++) s += Math.max(0, r.el[i+1]-r.el[i]); return Math.round(s); }
+// 안드로이드 앱(Capacitor) 안에서 돌면: 위치는 화면이 꺼져도 오는 백그라운드 위치, 음성은 휴대폰 음성 엔진
+const CAP = window.Capacitor, NATIVE = !!(CAP && CAP.isNativePlatform && CAP.isNativePlatform());
+const BGEO = NATIVE ? CAP.registerPlugin('BackgroundGeolocation') : null, TTS = NATIVE ? CAP.registerPlugin('TextToSpeech') : null;
 function speak(text){
+  if (TTS){ if (run.voice && text) TTS.speak({text, lang:'ko-KR', rate:1.05}).catch(()=>{}); return; }
   if (!run.voice || !window.speechSynthesis || !text) return;
   const u = new SpeechSynthesisUtterance(text); u.lang = 'ko-KR'; u.rate = 1.05; speechSynthesis.speak(u);
 }
@@ -1287,7 +1300,7 @@ function kmDone(){
 }
 // 8초 넘게 제자리면 자동 정지(신호 대기 등), 다시 움직이면 onFix에서 재개
 function autoCheck(){
-  if (document.hidden || run.resumeGap) return; // 화면이 꺼져 위치가 안 오는 건 멈춘 게 아니다
+  if (!NATIVE && (document.hidden || run.resumeGap)) return; // 웹: 화면이 꺼져 위치가 안 오는 건 멈춘 게 아니다(앱은 꺼져도 위치가 온다)
   if (run.mode !== 'running' || run.auto || !run.lastMoveT || now() - run.lastMoveT < 8000) return;
   run.activeMs += Math.max(0, run.lastMoveT - run.since); run.since = run.lastMoveT; run.auto = true; run.stops++;
 }
@@ -1307,7 +1320,7 @@ function awakeNote(ok){
   el.classList.toggle('bad', !ok);
 }
 document.addEventListener('visibilitychange', () => {
-  if (run.mode === 'idle' || run.sim) return;
+  if (run.mode === 'idle' || run.sim || NATIVE) return;
   if (document.hidden){ run.hiddenAt = now(); return; }
   keepAwake();
   if (run.mode === 'running' && !run.auto && run.hiddenAt && now() - run.hiddenAt > 5000){ run.resumeGap = true; run.lastMoveT = now(); }
@@ -1333,20 +1346,34 @@ function startTracking(sim){
     status('시뮬레이션 중이에요. 실제 위치가 아니라 코스를 따라 10배 빠르게 움직입니다.');
     return true;
   }
+  const onCoords = (lon, lat, acc, spd, hd) => {
+    const x = (lon - LO0)*KX, y = (lat - LA0)*KY, [sx, sy] = rp(0);
+    status(Math.hypot(x-sx, y-sy) > 3000 ? '지금 위치가 코스에서 3km 넘게 떨어져 있어요. 출발지 근처에서 시작하거나 시뮬레이션으로 시험해 보세요.'
+      : NATIVE ? 'GPS 연결됨 · 앱에서는 화면을 꺼도 기록과 음성 안내가 계속돼요.' : 'GPS 연결됨 · 화면을 켜 둔 채로 달려 주세요.');
+    onFix(x, y, acc, spd > 0.5 ? hd : null);
+  };
+  if (BGEO){
+    // 알림창에 '기록 중'을 띄우는 포그라운드 서비스라 화면이 꺼져도 위치가 계속 온다
+    run.watch = BGEO.addWatcher({backgroundTitle:'orca 러닝 기록 중', backgroundMessage:'화면을 꺼도 기록과 음성 안내가 계속돼요.', requestPermissions:true, stale:false, distanceFilter:0},
+      (l, e) => {
+        if (e){ status(e.code === 'NOT_AUTHORIZED' ? '위치 권한이 꺼져 있어요. 휴대폰 설정 → 앱 → orca → 권한에서 위치를 허용해 주세요.' : 'GPS 신호를 못 잡고 있어요. 하늘이 보이는 곳으로 이동해 보세요.'); return; }
+        if (l) onCoords(l.longitude, l.latitude, l.accuracy, l.speed, l.bearing);
+      });
+    return true;
+  }
   if (!('geolocation' in navigator)){ status('이 브라우저는 위치 기능을 지원하지 않아요.'); return false; }
   if (!window.isSecureContext){ status('위치는 https 주소에서만 쓸 수 있어요. 배포된 주소로 열어 주세요.'); return false; }
   run.watch = navigator.geolocation.watchPosition(p => {
-    const c = p.coords, x = (c.longitude - LO0)*KX, y = (c.latitude - LA0)*KY;
-    const [sx, sy] = rp(0);
-    status(Math.hypot(x-sx, y-sy) > 3000 ? '지금 위치가 코스에서 3km 넘게 떨어져 있어요. 출발지 근처에서 시작하거나 시뮬레이션으로 시험해 보세요.' : 'GPS 연결됨 · 화면을 켜 둔 채로 달려 주세요.');
-    onFix(x, y, c.accuracy, c.speed > 0.5 ? c.heading : null);
+    const c = p.coords; onCoords(c.longitude, c.latitude, c.accuracy, c.speed, c.heading);
   }, e => {
     status(e.code === 1 ? '위치 권한이 꺼져 있어요. 브라우저 설정에서 이 사이트의 위치 권한을 허용해 주세요.' : 'GPS 신호를 못 잡고 있어요. 하늘이 보이는 곳으로 이동해 보세요.');
   }, {enableHighAccuracy:true, maximumAge:1000, timeout:15000});
   return true;
 }
 function stopTracking(){
-  if (run.sim) clearInterval(run.watch); else if (run.watch != null) navigator.geolocation.clearWatch(run.watch);
+  if (run.sim) clearInterval(run.watch);
+  else if (BGEO && run.watch) Promise.resolve(run.watch).then(id => BGEO.removeWatcher({id})).catch(()=>{}); // addWatcher는 id를 Promise로 준다
+  else if (run.watch != null) navigator.geolocation.clearWatch(run.watch);
   run.watch = null;
   if (run.lock){ run.lock.release().catch(()=>{}); run.lock = null; }
 }
@@ -1364,7 +1391,7 @@ const ACT = {
     run.mode = 'running';
     if (!startTracking(sim === true)){ run.mode = 'idle'; renderRun(); return; }
     run.since = now(); keepAwake(); renderRun();
-    if (!sim) status('화면을 끄면 휴대폰이 위치를 안 보내서 기록이 멈춰요. 주머니에 넣을 땐 아래 "주머니 모드"를 켜 두세요.');
+    if (!sim) status(NATIVE ? '앱에서는 화면을 꺼도 기록과 음성 안내가 계속돼요. 그냥 화면을 끄고 주머니에 넣으세요.' : '화면을 끄면 휴대폰이 위치를 안 보내서 기록이 멈춰요. 주머니에 넣을 땐 아래 "주머니 모드"를 켜 두세요.');
     document.getElementById('report').hidden = true;
     speak('출발합니다. ' + (r.dist/1000).toFixed(1) + '킬로미터 ' + (state.dest ? endName() + '까지 가는' : '순환') + ' 코스예요.'); // 시작 버튼 탭이 있어야 휴대폰에서 음성이 나온다
   },
@@ -1449,7 +1476,8 @@ document.getElementById('awaybtn').onclick = () => {
 document.getElementById('voicebtn').onclick = e => {
   run.voice = !run.voice; e.target.setAttribute('aria-pressed', String(run.voice));
   e.target.textContent = run.voice ? '음성 안내 켜짐' : '음성 안내 꺼짐';
-  if (!run.voice && window.speechSynthesis) speechSynthesis.cancel();
+  if (!run.voice && TTS) TTS.stop().catch(()=>{});
+  else if (!run.voice && window.speechSynthesis) speechSynthesis.cancel();
 };
 setInterval(() => { if (run.mode !== 'idle'){ autoCheck(); renderRun(); } }, 1000);
 
@@ -1467,9 +1495,9 @@ function renderAll(refit){
     .forEach(([label, on, fn]) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.setAttribute('aria-pressed', String(on)); b.onclick = fn; sd.appendChild(b); }); seg('seg-dist', DIST_OPTS, 'dist'); seg('seg-terr', TERR_OPTS, 'terr');
   seg('seg-wx', WX_OPTS, 'wx'); seg('seg-rest', REST_OPTS, 'rests');
 
-  document.getElementById('wxmsg').textContent = wxMode() === 'clear' ? '' : wxNote();
+  document.getElementById('wxmsg').textContent = wxNote();
   document.getElementById('moresum').textContent = [state.dest ? '도착 ' + state.dest.label : '출발지로 돌아오기', TERR_OPTS.find(o => o[0] === state.terr)[1],
-    state.wx === 'auto' ? (NOW ? NOW.temp + '°C ' + NOW.desc : '현재 날씨') : WX_OPTS.find(o => o[0] === state.wx)[1],
+    (NOW ? NOW.temp + '°C ' + NOW.desc : '현재 날씨') + (state.wx !== 'auto' ? ' ' + WX_OPTS.find(o => o[0] === state.wx)[1] : ''),
     state.rests ? '쉬기 ' + state.rests + '번' : '쉬기 없음'].join(' · ');
   renderCards(); renderStrip(); renderProfile(); renderBrief();
   if (refit) fit();

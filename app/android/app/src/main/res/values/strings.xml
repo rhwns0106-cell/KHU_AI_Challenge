@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">orca</string>
+    <string name="title_activity_main">orca</string>
+    <string name="package_name">app.orca.khu</string>
+    <string name="custom_url_scheme">app.orca.khu</string>
+</resources>

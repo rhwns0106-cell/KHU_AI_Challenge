@@ -1,0 +1,7 @@
+{
+  "appId": "app.orca.khu",
+  "appName": "orca",
+  "webDir": "www",
+  "server": { "url": "https://orca-khu.vercel.app", "cleartext": false },
+  "android": { "backgroundColor": "#121212" }
+}
