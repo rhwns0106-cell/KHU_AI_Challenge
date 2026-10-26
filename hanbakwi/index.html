@@ -434,7 +434,7 @@ async function applyAsk(){
 }
 
 /* ---------- 지난 기록: 서버(연결돼 있으면) + 이 기기 ---------- */
-const DEVICE = (() => { try { let v = localStorage.getItem('orca.device'); if (!v){ v = crypto.randomUUID(); localStorage.setItem('orca.device', v); } return v; } catch(e){ return crypto.randomUUID(); } })();
+const DEVICE = (() => { try { let v = localStorage.getItem('orca.device'); if (!v){ v = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2); localStorage.setItem('orca.device', v); } return v; } catch(e){ return crypto.randomUUID(); } })();
 let history = [], serverOK = false;
 function localRuns(){ try { return JSON.parse(localStorage.getItem('hanbakwi.runs') || '[]'); } catch(e){ return []; } }
 async function loadHistory(){
@@ -1280,7 +1280,13 @@ function activeNow(){ return run.activeMs + (run.mode === 'running' && !run.auto
 function climbBetween(r, a, b){ let s = 0; for (let i = Math.max(0, a); i < Math.min(r.el.length-1, b); i++) s += Math.max(0, r.el[i+1]-r.el[i]); return Math.round(s); }
 // 안드로이드 앱(Capacitor) 안에서 돌면: 위치는 화면이 꺼져도 오는 백그라운드 위치, 음성은 휴대폰 음성 엔진
 const CAP = window.Capacitor, NATIVE = !!(CAP && CAP.isNativePlatform && CAP.isNativePlatform());
-const BGEO = NATIVE ? CAP.registerPlugin('BackgroundGeolocation') : null, TTS = NATIVE ? CAP.registerPlugin('TextToSpeech') : null;
+// 앱은 원격 사이트를 띄우는 구조라 @capacitor/core(registerPlugin)가 없다 → 네이티브 다리(nativePromise/nativeCallback)를 직접 부른다
+const BGEO = NATIVE ? {
+  addWatcher: (o, cb) => Promise.resolve(CAP.nativeCallback('BackgroundGeolocation', 'addWatcher', o, (l, e) => cb(l, e))),
+  removeWatcher: o => CAP.nativePromise('BackgroundGeolocation', 'removeWatcher', o)
+} : null;
+if (NATIVE) document.getElementById('runstatus').textContent = '시작을 누르면 GPS로 내 위치를 따라가며 다음에 갈 방향을 알려줘요. 앱에서는 화면을 꺼도 기록돼요.';
+const TTS = NATIVE ? {speak: o => CAP.nativePromise('TextToSpeech', 'speak', o), stop: () => CAP.nativePromise('TextToSpeech', 'stop', {})} : null;
 function speak(text){
   if (TTS){ if (run.voice && text) TTS.speak({text, lang:'ko-KR', rate:1.05}).catch(()=>{}); return; }
   if (!run.voice || !window.speechSynthesis || !text) return;
