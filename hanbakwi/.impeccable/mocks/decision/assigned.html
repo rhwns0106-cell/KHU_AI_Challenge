@@ -1,90 +1,61 @@
-<!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=390">
-<link href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@400;600;800;900&display=swap" rel="stylesheet">
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;900&family=Nanum+Pen+Script&display=swap" rel="stylesheet">
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{width:390px;height:844px;overflow:hidden}
-body{font-family:"Gothic A1",sans-serif;background:#F2F3F5;color:#1C1E21}
-.top{background:#0052A4;color:#fff;padding:14px 16px 16px}
-.brand{display:flex;align-items:center;gap:8px;font-weight:900;font-size:22px;letter-spacing:-.02em}
-.brand i{width:22px;height:22px;border-radius:50%;border:5px solid #fff;display:inline-block}
-.brand small{font-weight:600;font-size:12px;opacity:.8;margin-left:auto}
-.ask{margin-top:12px;display:flex;background:#fff;border-radius:10px;overflow:hidden}
-.ask span{flex:1;padding:12px;font-size:14px;color:#1C1E21}
-.ask b{background:#1C1E21;color:#fff;padding:12px 14px;font-size:14px}
-.chips{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
-.chips span{font-size:12px;font-weight:600;background:rgba(255,255,255,.16);padding:3px 9px;border-radius:999px}
-.tabs{display:flex;gap:0;background:#fff;border-bottom:1px solid #D9DCE1}
-.tab{flex:1;padding:10px 0 8px;text-align:center;font-size:13px;font-weight:800;color:#8A9099;border-bottom:4px solid transparent}
-.tab.on{color:#1C1E21;border-color:#1C1E21}
-.tab em{font-style:normal;display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#8A9099;color:#fff;font-size:11px;margin-right:4px}
-.tab.on em{background:#1C1E21}
-.strip{background:#fff;padding:14px 16px 12px}
-.strip h2{font-size:12px;font-weight:800;color:#5B616B;letter-spacing:.04em}
-.line{position:relative;height:56px;margin-top:8px}
-.bar{position:absolute;left:10px;right:10px;top:16px;height:10px;border-radius:5px;display:flex;overflow:hidden}
-.bar i{height:100%}
-.st{position:absolute;top:10px;width:22px;height:22px;margin-left:-11px;border-radius:50%;background:#fff;border:4px solid #1C1E21}
-.st.end{width:28px;height:28px;margin-left:-14px;top:7px;border-width:6px}
-.lbl{position:absolute;top:38px;font-size:11px;font-weight:700;transform:translateX(-50%);white-space:nowrap}
-.budget{display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;font-size:12px;color:#5B616B}
-.budget b{font-size:15px;color:#1C1E21}
-.nums{display:grid;grid-template-columns:repeat(4,1fr);background:#fff;border-top:1px solid #E6E8EB}
-.nums div{padding:9px 0 10px;text-align:center;border-right:1px solid #E6E8EB}
-.nums div:last-child{border-right:0}
-.nums small{display:block;font-size:11px;color:#5B616B;font-weight:600}
-.nums b{font-size:17px;font-weight:900}
-.map{position:relative;height:330px;background:#E9ECE6}
+*{box-sizing:border-box;margin:0}
+body{width:390px;height:844px;overflow:hidden;font-family:"Gothic A1",sans-serif;color:#1F2430;
+ background:#F6F7F2;background-image:linear-gradient(#DDE3EA 1px,transparent 1px),linear-gradient(90deg,#DDE3EA 1px,transparent 1px);background-size:18px 18px}
+.top{padding:18px 16px 10px;display:flex;align-items:baseline;gap:8px}
+.top b{font-size:26px;font-weight:900;letter-spacing:-.02em}
+.top span{font-family:"Nanum Pen Script";font-size:22px;color:#5A6170}
+.ask{margin:0 16px;display:flex;align-items:center;border-bottom:2.5px solid #1F2430;padding:8px 0}
+.ask p{flex:1;font-size:16px;font-weight:700}
+.ask i{font-style:normal;background:#2B59FF;color:#fff;font-weight:800;font-size:14px;padding:8px 12px;border-radius:6px}
+.tapes{display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px}
+.tape{font-family:"Nanum Pen Script";font-size:21px;padding:2px 10px;background:rgba(255,225,90,.75);transform:rotate(-1.5deg)}
+.tape:nth-child(2){background:rgba(123,220,106,.6);transform:rotate(1deg)}
+.tape:nth-child(3){background:rgba(91,184,255,.55);transform:rotate(-.5deg)}
+.map{position:relative;height:330px;margin:4px 0;border-block:1.5px solid #1F2430;background:#EEF1EA}
 .map svg{position:absolute;inset:0}
-.brief{background:#fff;margin:0;padding:12px 16px;border-top:1px solid #D9DCE1;font-size:13px;line-height:1.5}
-.brief b{display:inline-block;background:#0052A4;color:#fff;font-size:10px;font-weight:800;padding:1px 6px;border-radius:3px;margin-right:6px}
+.sum{padding:12px 16px 6px;display:flex;justify-content:space-between;align-items:baseline}
+.sum h2{font-size:20px;font-weight:900}
+.sum em{font-style:normal;font-weight:900;font-size:22px}
+.sum small{display:block;font-size:13px;color:#5A6170;font-weight:500}
+.hl{margin:4px 16px 12px;height:14px;border-radius:7px;display:flex;overflow:hidden;opacity:.9}
+.hl i{display:block;height:100%}
+.list{margin:0 16px;border-top:1.5px solid #1F2430}
+.row{display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:center;padding:11px 0;border-bottom:1px dashed #9AA3B2}
+.box{width:22px;height:22px;border:2.5px solid #1F2430;border-radius:4px;display:grid;place-items:center;font-weight:900;font-size:13px}
+.row.on .box{background:#1F2430;color:#F6F7F2}
+.row b{font-size:15px;font-weight:800;display:block}
+.row small{font-size:12.5px;color:#5A6170}
+.row .km{font-size:22px;font-weight:900}
+.row:not(.on){opacity:.6}
+.ai{margin:12px 16px;font-size:13.5px;line-height:1.55;padding:10px 12px;background:#fff;border:1.5px solid #1F2430;border-radius:8px}
+.ai b{background:rgba(255,225,90,.8);padding:0 3px}
 </style></head><body>
-<div class="top">
-  <div class="brand"><i></i>한바퀴<small>국제캠 순환 코스</small></div>
-  <div class="ask"><span>공강 30분인데 오르막 싫어, 정문에서 출발</span><b>코스 찾기</b></div>
-  <div class="chips"><span>출발 경희대 정문</span><span>5km</span><span>평지 위주</span></div>
+<div class="top"><b>orca</b><span>오늘의 러닝 노트</span></div>
+<div class="ask"><p>공강 30분인데 오르막 싫어, 정문에서 출발</p><i>코스 찾기</i></div>
+<div class="tapes"><span class="tape">경희대 정문 출발</span><span class="tape">30분 · 5km</span><span class="tape">평지 위주</span></div>
+<div class="map"><svg viewBox="0 0 390 330">
+ <g stroke="#C9D0D8" stroke-width="7" fill="none" stroke-linecap="round"><path d="M0 250 L390 210"/><path d="M120 0 L170 330"/><path d="M260 0 L300 330"/><path d="M0 90 L390 120"/></g>
+ <path d="M70 60 C120 50 160 90 150 140 S90 220 140 260" stroke="#9AA3B2" stroke-width="2.5" fill="none" stroke-dasharray="5 6"/>
+ <g fill="none" stroke-linecap="round" stroke-width="16" opacity=".85">
+  <path d="M270 250 L300 190" stroke="#7BDC6A"/><path d="M300 190 C310 150 300 110 270 90" stroke="#FFE15A"/>
+  <path d="M270 90 C230 70 190 80 170 110" stroke="#7BDC6A"/><path d="M170 110 C150 150 160 200 190 230" stroke="#5BB8FF"/>
+  <path d="M190 230 C220 255 250 262 270 250" stroke="#FF9F45"/></g>
+ <path d="M270 250 L300 190 C310 150 300 110 270 90 C230 70 190 80 170 110 C150 150 160 200 190 230 C220 255 250 262 270 250" stroke="#1F2430" stroke-width="2" fill="none"/>
+ <g font-family="Gothic A1" font-weight="900" font-size="11" text-anchor="middle">
+  <circle cx="303" cy="160" r="12" fill="#fff" stroke="#1F2430" stroke-width="2"/><text x="303" y="164">1</text>
+  <circle cx="225" cy="76" r="12" fill="#fff" stroke="#1F2430" stroke-width="2"/><text x="225" y="80">2</text>
+  <circle cx="160" cy="170" r="12" fill="#fff" stroke="#1F2430" stroke-width="2"/><text x="160" y="174">3</text>
+  <circle cx="230" cy="257" r="12" fill="#fff" stroke="#1F2430" stroke-width="2"/><text x="230" y="261">4</text></g>
+ <circle cx="270" cy="250" r="10" fill="#1F2430"/><text x="285" y="278" font-family="Nanum Pen Script" font-size="22">경희대 정문 · 출발/도착</text>
+</svg></div>
+<div class="sum"><div><h2>A선 · 정문 순환</h2><small>신호 건널목 2곳 · 오르막 +1분 · 공강 30분 중 4분 넘음</small></div><em>34분</em></div>
+<div class="hl"><i style="width:46%;background:#7BDC6A"></i><i style="width:20%;background:#FFE15A"></i><i style="width:6%;background:#FF9F45"></i><i style="width:28%;background:#5BB8FF"></i></div>
+<div class="list">
+ <div class="row on"><span class="box">A</span><span><b>A선 · 정문 순환</b><small>34분 · 신호 2곳 · 상승 63m</small></span><span class="km">4.83</span></div>
+ <div class="row"><span class="box">B</span><span><b>B선 · 정문 순환</b><small>37분 · 신호 3곳 · 상승 74m</small></span><span class="km">5.28</span></div>
 </div>
-<div class="tabs">
-  <div class="tab on"><em>A</em>5.35km</div>
-  <div class="tab"><em>B</em>4.85km</div>
-  <div class="tab"><em>C</em>4.61km</div>
-</div>
-<div class="strip">
-  <h2>A선 · 정문 순환</h2>
-  <div class="line">
-    <div class="bar"><i style="width:22%;background:#3CB44A"></i><i style="width:9%;background:#F5A200"></i><i style="width:6%;background:#EF7C1C"></i><i style="width:25%;background:#3CB44A"></i><i style="width:11%;background:#F5A200"></i><i style="width:27%;background:#3CB44A"></i></div>
-    <span class="st end" style="left:10px"></span><span class="lbl" style="left:14px">정문</span>
-    <span class="st" style="left:75px"></span><span class="lbl" style="left:75px">1km</span>
-    <span class="st" style="left:140px"></span><span class="lbl" style="left:140px">2km</span>
-    <span class="st" style="left:205px"></span><span class="lbl" style="left:205px">영통역</span>
-    <span class="st" style="left:270px"></span><span class="lbl" style="left:270px">4km</span>
-    <span class="st end" style="left:348px"></span><span class="lbl" style="left:344px">정문</span>
-  </div>
-  <div class="budget"><span>예상 35분 · 공강 30분보다</span><b>5분 초과</b></div>
-</div>
-<div class="nums">
-  <div><small>거리</small><b>5.35</b></div>
-  <div><small>예상</small><b>35분</b></div>
-  <div><small>상승</small><b>67m</b></div>
-  <div><small>최대 경사</small><b>8%</b></div>
-</div>
-<div class="map">
-  <svg viewBox="0 0 390 330" width="390" height="330">
-    <path d="M0 60 L390 110 M40 0 L120 330 M0 230 L390 200 M260 0 L300 330" stroke="#fff" stroke-width="9"/>
-    <path d="M0 150 L390 170 M180 0 L200 330" stroke="#fff" stroke-width="4"/>
-    <ellipse cx="300" cy="70" rx="70" ry="45" fill="#CFE3C8"/>
-    <path d="M250 270 L230 230 L120 210 L80 150 L130 90 L220 70 L280 120 L270 200 Z" fill="none" stroke="#fff" stroke-width="12" stroke-linejoin="round"/>
-    <path d="M250 270 L230 230 L120 210" fill="none" stroke="#3CB44A" stroke-width="7"/>
-    <path d="M120 210 L80 150" fill="none" stroke="#F5A200" stroke-width="7"/>
-    <path d="M80 150 L130 90" fill="none" stroke="#EF7C1C" stroke-width="7"/>
-    <path d="M130 90 L220 70 L280 120" fill="none" stroke="#3CB44A" stroke-width="7"/>
-    <path d="M280 120 L270 200 L250 270" fill="none" stroke="#3CB44A" stroke-width="7"/>
-    <path d="M250 270 L215 250 L150 260 L110 230" fill="none" stroke="#8A9099" stroke-width="3" stroke-dasharray="6 5" opacity=".6"/>
-    <circle cx="250" cy="270" r="10" fill="#fff" stroke="#1C1E21" stroke-width="6"/>
-    <text x="266" y="275" font-size="13" font-weight="800" font-family="Gothic A1">경희대 정문</text>
-    <circle cx="80" cy="150" r="7" fill="#fff" stroke="#1C1E21" stroke-width="4"/>
-    <circle cx="220" cy="70" r="7" fill="#fff" stroke="#1C1E21" stroke-width="4"/>
-  </svg>
-</div>
-<div class="brief"><b>AI</b>1.2km부터 280m 완만한 오르막이 있어요. 나머지는 평지라 페이스 유지가 쉬워요.</div>
+<p class="ai"><b>AI</b> 평지 46%예요(초록). <b>2.1km</b>부터 300m 완만한 오르막(+14m)이 있어요.</p>
 </body></html>

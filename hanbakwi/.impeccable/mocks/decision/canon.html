@@ -1,0 +1,33 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:390px;height:844px;overflow:hidden;font-family:"Noto Sans KR",sans-serif;background:#fff;color:#1A1A1A}
+.top{padding:14px 16px;display:flex;justify-content:space-between;align-items:center}
+.top b{font-size:22px;font-weight:900}
+.ask{margin:0 16px;display:flex;background:#F2F2F2;border-radius:24px}
+.ask p{flex:1;padding:12px 16px;font-size:15px;color:#333}
+.ask i{font-style:normal;margin:4px;background:#FC4C02;color:#fff;font-weight:700;padding:8px 14px;border-radius:20px}
+.chips{display:flex;gap:6px;padding:10px 16px}
+.chips span{font-size:13px;padding:6px 12px;border-radius:16px;background:#F2F2F2;font-weight:500}
+.map{height:340px;background:#EDEFEA;position:relative}
+.map svg{position:absolute;inset:0}
+.sheet{margin-top:-18px;position:relative;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -4px 16px rgba(0,0,0,.08);padding:14px 16px}
+.handle{width:40px;height:4px;background:#DDD;border-radius:2px;margin:0 auto 12px}
+.card{display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:12px;border:1px solid #EEE;margin-bottom:8px}
+.card.on{border-color:#FC4C02}
+.card b{font-size:15px}.card small{display:block;color:#5F5F5F;font-size:12.5px}
+.card em{font-style:normal;font-size:22px;font-weight:900}
+.start{margin-top:6px;background:#FC4C02;color:#fff;text-align:center;font-weight:900;padding:15px;border-radius:28px;font-size:16px}
+</style></head><body>
+<div class="top"><b>orca</b><span style="font-size:13px;color:#5F5F5F">17°C 구름</span></div>
+<div class="ask"><p>공강 30분인데 오르막 싫어</p><i>찾기</i></div>
+<div class="chips"><span>정문 출발</span><span>5km</span><span>평지 위주</span></div>
+<div class="map"><svg viewBox="0 0 390 340"><g stroke="#fff" stroke-width="8" fill="none"><path d="M0 250 L390 220"/><path d="M120 0 L170 340"/><path d="M280 0 L310 340"/></g>
+<path d="M270 260 L300 195 C310 155 300 115 270 98 C230 80 190 90 170 118 C150 158 160 208 190 236 C220 262 250 270 270 260" stroke="#FC4C02" stroke-width="6" fill="none" stroke-linecap="round"/>
+<circle cx="270" cy="260" r="9" fill="#fff" stroke="#FC4C02" stroke-width="4"/></svg></div>
+<div class="sheet"><div class="handle"></div>
+ <div class="card on"><span><b>A 코스 · 정문 순환</b><small>34분 · 신호 2곳 · 상승 63m</small></span><em>4.83km</em></div>
+ <div class="card"><span><b>B 코스 · 정문 순환</b><small>37분 · 신호 3곳 · 상승 74m</small></span><em>5.28km</em></div>
+ <div class="start">달리기 시작</div></div>
+</body></html>

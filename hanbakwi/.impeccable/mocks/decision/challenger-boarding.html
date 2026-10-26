@@ -1,0 +1,47 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:390px;height:844px;overflow:hidden;font-family:"Gothic A1",sans-serif;background:#F4F5F7;color:#14171C}
+.top{padding:16px;display:flex;justify-content:space-between;align-items:center}
+.top b{font-size:24px;font-weight:900}
+.ask{margin:0 16px;display:flex;background:#fff;border:1px solid #C9CED6;border-radius:10px}
+.ask p{flex:1;padding:12px;font-size:15px;font-weight:700}
+.ask i{font-style:normal;margin:4px;background:#2F6BFF;color:#fff;font-weight:800;padding:8px 12px;border-radius:7px}
+.board{margin:14px 16px 0;background:#14171C;color:#F4F5F7;border-radius:10px;overflow:hidden}
+.bh,.br{display:grid;grid-template-columns:34px 1fr 54px 58px;gap:6px;padding:9px 12px;align-items:center}
+.bh{font-size:11px;color:#9AA2AE;font-weight:700;border-bottom:1px solid #2B3038}
+.br{font-family:"JetBrains Mono";font-size:14px;border-bottom:1px solid #22262D}
+.br b{font-family:"Gothic A1";font-weight:800}
+.br.chg{background:#FFB800;color:#14171C}
+.map{height:220px;margin:12px 16px;border-radius:10px;background:#E3E6EB;position:relative;overflow:hidden}
+.map svg{position:absolute;inset:0}
+.pass{margin:0 16px;background:#fff;border:1px solid #C9CED6;border-radius:12px;display:grid;grid-template-columns:1fr 92px}
+.seg{padding:12px 14px;border-right:2px dashed #C9CED6}
+.seg h3{font-size:12px;color:#5B6370}
+.route{display:flex;align-items:center;gap:8px;font-size:20px;font-weight:900;margin:2px 0 10px}
+.route i{flex:1;height:2px;background:#14171C}
+.cells{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.cells div{border-top:1px solid #DCE0E6;padding-top:5px}
+.cells small{font-size:10.5px;color:#5B6370;display:block}
+.cells em{font-style:normal;font-family:"JetBrains Mono";font-size:16px;font-weight:700}
+.stub{padding:12px 8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.stub em{font-style:normal;font-family:"JetBrains Mono";font-size:26px;font-weight:700}
+.stub i{font-style:normal;background:#2F6BFF;color:#fff;font-weight:800;font-size:13px;padding:8px 10px;border-radius:7px}
+</style></head><body>
+<div class="top"><b>orca</b><span style="font-size:13px;color:#5B6370">오늘 17:40 출발 기준</span></div>
+<div class="ask"><p>공강 30분인데 오르막 싫어, 정문에서</p><i>찾기</i></div>
+<div class="board">
+ <div class="bh"><span>선</span><span>코스</span><span>거리</span><span>예상</span></div>
+ <div class="br"><b>A</b><b>정문 순환 · 평지</b><span>4.83</span><span>34분</span></div>
+ <div class="br chg"><b>B</b><b>정문 순환 · 경로 변경</b><span>5.28</span><span>37분</span></div>
+ <div class="br"><b>C</b><b>정문 순환 · 그늘</b><span>5.09</span><span>36분</span></div>
+</div>
+<div class="map"><svg viewBox="0 0 358 220"><g stroke="#fff" stroke-width="7" fill="none"><path d="M0 160 L358 130"/><path d="M110 0 L150 220"/></g>
+<path d="M240 170 L265 120 C272 90 262 60 235 50 C200 38 168 48 150 72 C132 104 140 140 166 158 C192 176 220 180 240 170" stroke="#2F6BFF" stroke-width="7" fill="none" stroke-linecap="round"/>
+<circle cx="240" cy="170" r="8" fill="#14171C"/></svg></div>
+<div class="pass"><div class="seg"><h3>A선 탑승권</h3>
+ <div class="route"><span>정문</span><i></i><span>정문</span></div>
+ <div class="cells"><div><small>신호 건널목</small><em>2</em></div><div><small>누적 상승</small><em>63m</em></div><div><small>공강 대비</small><em>+4분</em></div></div></div>
+ <div class="stub"><em>4.83</em><small style="font-size:11px">km</small><i>출발</i></div></div>
+</body></html>

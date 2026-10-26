@@ -1,0 +1,37 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;900&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:390px;height:844px;overflow:hidden;font-family:"Gothic A1",sans-serif;background:#2A2D31;color:#F2F2F0}
+.top{padding:16px;display:flex;justify-content:space-between;align-items:center}
+.top b{font-size:24px;font-weight:900}
+.top span{font-family:"Barlow Condensed";font-size:18px;color:#FFB000}
+.ask{margin:0 16px;display:flex;background:#16181B;border:1px solid #474C53;border-radius:8px}
+.ask p{flex:1;padding:12px;font-size:15px;font-weight:700}
+.ask i{font-style:normal;margin:4px;background:#F2F2F0;color:#16181B;font-weight:900;padding:8px 12px;border-radius:6px}
+.map{height:250px;margin:12px 16px;border-radius:8px;background:#1E2125;position:relative;overflow:hidden}
+.map svg{position:absolute;inset:0}
+.board{margin:0 16px;background:#16181B;border:3px solid #C8CDD3;border-radius:6px;padding:8px}
+.hd{display:grid;grid-template-columns:30px 1fr 64px 52px;gap:6px;font-size:11px;color:#9EA4AB;font-weight:700;padding:0 2px 6px}
+.r{display:grid;grid-template-columns:30px 1fr 64px 52px;gap:6px;margin-bottom:6px}
+.f{background:#0E0F11;border-radius:3px;padding:6px 6px 5px;font-family:"Barlow Condensed";font-size:21px;font-weight:700;position:relative;letter-spacing:.04em}
+.f::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:#000}
+.f.k{font-family:"Gothic A1";font-size:14px;font-weight:800;padding-top:9px}
+.lamp{width:8px;height:8px;border-radius:50%;background:#FFB000;display:inline-block;margin-right:6px}
+.r.d .f{color:#FFB000}
+.note{margin:12px 16px;font-size:13.5px;line-height:1.55;color:#C8CDD3}
+.note b{color:#F2F2F0}
+.go{margin:0 16px;background:#FFB000;color:#16181B;font-weight:900;text-align:center;padding:14px;border-radius:8px;font-size:16px}
+</style></head><body>
+<div class="top"><b>orca</b><span>17:40 출발 안내</span></div>
+<div class="ask"><p>공강 30분인데 오르막 싫어, 정문에서</p><i>찾기</i></div>
+<div class="map"><svg viewBox="0 0 358 250"><g stroke="#2C3036" stroke-width="7" fill="none"><path d="M0 180 L358 150"/><path d="M110 0 L150 250"/></g>
+<path d="M240 190 L265 130 C272 95 262 65 235 55 C200 42 168 52 150 78 C132 112 140 150 166 170 C192 190 220 196 240 190" stroke="#F2F2F0" stroke-width="6" fill="none"/>
+<circle cx="240" cy="190" r="9" fill="#16181B" stroke="#F2F2F0" stroke-width="4"/></svg></div>
+<div class="board"><div class="hd"><span>선</span><span>코스</span><span>KM</span><span>분</span></div>
+ <div class="r"><span class="f">A</span><span class="f k">정문 순환 · 평지</span><span class="f">4.83</span><span class="f">34</span></div>
+ <div class="r d"><span class="f">B</span><span class="f k"><i class="lamp"></i>신호 3곳</span><span class="f">5.28</span><span class="f">37</span></div>
+ <div class="r"><span class="f">C</span><span class="f k">그늘 13%</span><span class="f">5.09</span><span class="f">36</span></div></div>
+<p class="note"><b>AI</b> A선은 평지 46%, 2.1km부터 300m 완만한 오르막이에요.</p>
+<div class="go">A선으로 출발</div>
+</body></html>
