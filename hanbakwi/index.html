@@ -185,6 +185,8 @@ canvas.drag{cursor:grabbing}
 .pk-dist{margin:0;font-size:20px}.pk-dist b{font-family:var(--num);font-size:30px;font-weight:600}
 .pk-guide{margin:0;font-size:22px;font-weight:800;max-width:24ch;color:#fff}
 .pk-hint{margin:0;font-size:13px;color:#8A90A0;max-width:30ch;line-height:1.6}.pk-hint b{color:#D8DCE4}
+.pk-awake{margin:0;font-size:13px;color:#7FD49A;max-width:30ch;line-height:1.5}
+.pk-awake.bad{color:#FFB37A;font-weight:700}
 .pk-hold{width:180px;height:6px;border-radius:3px;background:#222;overflow:hidden}
 .pk-hold i{display:block;height:100%;width:0;background:#D03E00}
 .pocket{touch-action:none;user-select:none;-webkit-user-select:none}
@@ -331,6 +333,7 @@ canvas.drag{cursor:grabbing}
   <p class="pk-time" id="pk-time">0:00</p>
   <p class="pk-dist"><b id="pk-dist">0.00</b> km · 페이스 <b id="pk-pace">--</b></p>
   <p class="pk-guide" id="pk-guide"></p>
+  <p class="pk-awake" id="pk-awake" role="status">화면 꺼짐 방지 확인 중</p>
   <div class="pk-hold" aria-hidden="true"><i id="pk-fill"></i></div>
   <p class="pk-hint">화면을 끄면 기록이 멈춰요. 이 화면 그대로 주머니에 넣으세요.<br>돌아가려면 화면을 <b>1.5초 길게</b> 누르세요.</p>
 </div>
@@ -1256,7 +1259,21 @@ function autoCheck(){
   if (run.mode !== 'running' || run.auto || !run.lastMoveT || now() - run.lastMoveT < 8000) return;
   run.activeMs += Math.max(0, run.lastMoveT - run.since); run.since = run.lastMoveT; run.auto = true; run.stops++;
 }
-async function keepAwake(){ try { run.lock = await navigator.wakeLock.request('screen'); } catch(e){} }
+// 화면 꺼짐 방지. 거절되면(초절전 모드·미지원 브라우저) 조용히 넘어가지 말고 주머니 모드에 알린다,
+// 알림·앱 전환 등으로 풀리면 다시 건다
+async function keepAwake(){
+  if (run.lock && !run.lock.released) return awakeNote(true);
+  try {
+    run.lock = await navigator.wakeLock.request('screen');
+    run.lock.addEventListener('release', () => { awakeNote(false); if (run.mode !== 'idle' && document.visibilityState === 'visible') keepAwake(); });
+    awakeNote(true);
+  } catch(e){ run.lock = null; awakeNote(false); }
+}
+function awakeNote(ok){
+  const el = document.getElementById('pk-awake'); if (!el) return;
+  el.textContent = ok ? '화면 꺼짐 방지 켜짐' : '이 휴대폰에서는 화면 꺼짐 방지가 안 돼요. 설정 → 디스플레이 → 화면 자동 꺼짐 시간을 10분으로 늘려 주세요.';
+  el.classList.toggle('bad', !ok);
+}
 document.addEventListener('visibilitychange', () => {
   if (run.mode === 'idle' || run.sim) return;
   if (document.hidden){ run.hiddenAt = now(); return; }
