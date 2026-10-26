@@ -106,5 +106,22 @@
     return out;
   }
 
-  root.OrcaLoop = {prep, near, makeLoops};
+  // 달리다 코스를 벗어났을 때: 지금 위치에서 앞쪽 남은 코스(100m~1km) 중 가장 덜 돌아가는 지점으로 붙는 길을 찾고,
+  // 그 뒤는 원래 코스를 그대로 잇는다. 앞쪽만 보므로 출발점으로 돌아오는 순환은 유지된다.
+  function rejoin(P, r, prog, x, y) {
+    const n = r.pts.length / 2, [s] = near(P, x, y);
+    let best = null;
+    for (let i = Math.min(n - 1, prog + 4); i <= Math.min(n - 1, prog + 40); i += 4) {
+      const [t] = near(P, r.pts[2*i], r.pts[2*i+1]), p = sp(P, s, t, new Set());
+      if (!p) continue;
+      const L = p.es.reduce((a, e) => a + e.L, 0), cost = L - (i - prog) * STEP; // 원래 코스보다 더 뛰는 거리
+      if (!best || cost < best.cost) best = {i, p, L, cost};
+    }
+    if (!best) return null;
+    const d = finish(P, {path: best.p.path, L: best.L || 1, rep: 0, trail: 0, steps: 0, th: 0});
+    return Object.assign({}, r, {pts: d.pts.concat(r.pts.slice(2 * best.i)), el: d.el.concat(r.el.slice(best.i)),
+                                 dist: Math.round(best.L + (n - 1 - best.i) * STEP), rerouted: true});
+  }
+
+  root.OrcaLoop = {prep, near, makeLoops, rejoin};
 })(typeof window !== 'undefined' ? window : globalThis);
