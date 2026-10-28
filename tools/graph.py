@@ -1,4 +1,4 @@
-# 브라우저에서 코스를 만들 수 있게 보행 도로망 + 노드 고도를 hanbakwi/graph.js로 내보낸다.
+# 브라우저에서 코스를 만들 수 있게 보행 도로망 + 노드 고도를 main/graph.js로 내보낸다.
 # 좌표는 data.js와 같은 미터 평면(37.2432N, 127.0818E 기준). 실행: python tools/graph.py
 # (첫 실행은 고도를 받느라 몇 분 걸리고, 받은 고도는 tools/elev_cache.json에 남겨 다음엔 바로 끝난다)
 import json, math, os, time, urllib.request, urllib.parse
@@ -185,7 +185,7 @@ out = {'nodes': [v for o in keep for v in (round(nodes[o][0]), round(nodes[o][1]
        'edges': [v for (a, b), f in edges.items() if a in remap and b in remap for v in (remap[a], remap[b], f)],
        'rest': rest,
        'sig': [v for o in keep if osm_of[o] in sig_kind for v in (remap[o], sig_kind[osm_of[o]])]}  # 신호 노드 [노드 번호, 1 보행자 건널목 | 2 차량 신호]...  # 쉴 곳 [x, y, 종류(1 벤치 2 쉼터 3 음수대 4 화장실 5 피크닉 테이블)]...
-path = os.path.join(HERE, '..', 'hanbakwi', 'graph.js')
+path = os.path.join(HERE, '..', 'main', 'graph.js')
 with open(path, 'w', encoding='utf-8') as f:
     f.write('// 보행 도로망(OSM) + 노드 고도(SRTM 30m, 0.1m 단위) + 산길 표시. tools/graph.py로 생성\nwindow.ORCA_GRAPH=' + json.dumps(out, separators=(',', ':')) + ';\n')
 print(len(keep), 'nodes', len(out['edges']) // 3, 'edges', os.path.getsize(path) // 1024, 'KB')
